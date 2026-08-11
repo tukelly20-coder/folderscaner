@@ -47,6 +47,14 @@ processes: list[subprocess.Popen] = []
 _lock = threading.Lock()
 
 
+def _python_executable() -> str:
+    """Prefer the project virtualenv when it exists."""
+    venv_python = BASE_DIR / ".venv" / "Scripts" / "python.exe"
+    if venv_python.exists():
+        return str(venv_python)
+    return sys.executable
+
+
 def _log(msg: str) -> None:
     print(f"[startserver] {msg}", flush=True)
 
@@ -154,14 +162,14 @@ def _monitor_worker(proc: subprocess.Popen, name: str) -> None:
 def start_backend() -> subprocess.Popen:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(BACKEND_DIR)
-    env.setdefault("SERVER_PORT", "8000")
-    env.setdefault("SERVER_HOST", "0.0.0.0")
+    env.setdefault("SERVER_PORT", "18001")
+    env.setdefault("SERVER_HOST", "127.0.0.1")
 
     log_fh = _open_log(BACKEND_LOG)
     _log("Starting backend (uvicorn)...")
     proc = subprocess.Popen(
         [
-            sys.executable, "-m", "uvicorn",
+            _python_executable(), "-m", "uvicorn",
             "app.main:app",
             "--reload",
             "--port", env["SERVER_PORT"],
@@ -184,14 +192,23 @@ def start_backend() -> subprocess.Popen:
     return proc
 
 
+def _env_with_node() -> dict[str, str]:
+    env = os.environ.copy()
+    node_scripts = str(BASE_DIR / "node_env" / "Scripts")
+    if node_scripts not in env.get("PATH", ""):
+        env["PATH"] = node_scripts + os.pathsep + env.get("PATH", "")
+    return env
+
+
 def start_vite_frontend() -> subprocess.Popen:
     """Frontend via Vite dev server (npm run dev)."""
     log_fh = _open_log(FRONTEND_LOG)
     _log("Starting frontend (vite)...")
+    env = _env_with_node()
     proc = subprocess.Popen(
         ["npm", "run", "dev"],
         cwd=str(FRONTEND_DIR),
-        env=os.environ.copy(),
+        env=env,
         stdout=log_fh,
         stderr=subprocess.STDOUT,
         shell=(sys.platform == "win32"),
@@ -220,7 +237,7 @@ def start_proxy_frontend() -> subprocess.Popen:
             subprocess.run(
                 ["npm", "run", "build"],
                 cwd=str(FRONTEND_DIR),
-                env=os.environ.copy(),
+                env=_env_with_node(),
                 check=True,
                 timeout=120,
             )
@@ -230,8 +247,8 @@ def start_proxy_frontend() -> subprocess.Popen:
     log_fh = _open_log(FRONTEND_LOG)
     _log("Starting frontend (python proxy)...")
     proc = subprocess.Popen(
-        [sys.executable, str(BASE_DIR / "serve_frontend.py")],
-        env=os.environ.copy(),
+        [_python_executable(), str(BASE_DIR / "serve_frontend.py")],
+        env=_env_with_node(),
         stdout=log_fh,
         stderr=subprocess.STDOUT,
         **(

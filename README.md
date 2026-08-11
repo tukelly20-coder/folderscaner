@@ -138,8 +138,8 @@ Các tham số có thể chỉnh sửa qua file `.env`:
 | SMB_ROOT       | Đường dẫn thư mục chia sẻ SMB/UNC               | *(bắt buộc)*       |
 | SMB_EXCLUDES   | Danh sách thư mục bỏ qua, phân cách bằng dấu phẩy | sample_folder,test_folder,_deleted |
 | SCAN_INTERVAL  | Thời gian quét lại (giây)                       | 10                 |
-| SERVER_HOST    | Địa chỉ lắng nghe FastAPI                      | 0.0.0.0            |
-| SERVER_PORT    | Cổng FastAPI                                   | 8000               |
+| SERVER_HOST    | Địa chỉ lắng nghe FastAPI                      | 127.0.0.1          |
+| SERVER_PORT    | Cổng FastAPI nội bộ                            | 18001              |
 | SMB_USERNAME   | Tên đăng nhập SMB (nếu cần xác thực)            | *(để trống)*       |
 | SMB_PASSWORD   | Mật khẩu SMB                                    | *(để trống)*       |
 | SMB_DOMAIN     | Domain SMB                                      | *(để trống)*       |
@@ -194,12 +194,12 @@ python startserver.py
 ```
 
 Lệnh trên sẽ:
-- Khởi chạy backend (FastAPI/uvicorn) ở cổng `8000`.
-- Khởi chạy frontend (Vite dev server) ở cổng `5173`.
+- Khởi chạy backend (FastAPI/uvicorn) trên loopback nội bộ `127.0.0.1:18001`.
+- Build frontend để Propack phục vụ tại `http://localhost:8001/scanner/`.
 - Tự động dừng tất cả tiến trình con khi nhấn `Ctrl+C`.
 
-Tài liệu API tương tác có sẵn tại: http://localhost:8000/docs  
-Giao diện Web chạy tại: http://localhost:5173
+Khi chạy qua `Start_Pro_Scanner.py`, giao diện Scanner nằm tại: http://localhost:8001/scanner/  
+API Scanner đi qua Propack tại: http://localhost:8001/scanner-api/*
 
 #### Các chế độ khác
 

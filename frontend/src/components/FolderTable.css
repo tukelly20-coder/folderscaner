@@ -5,6 +5,24 @@
   gap: 1rem;
 }
 
+.app-container.embedded .folder-table-container {
+  height: 100vh;
+  gap: 0;
+}
+
+.app-container.embedded .toolbar {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.app-container.embedded .folder-grid {
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 0;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -28,6 +46,49 @@
 .toolbar button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.scanner-root-toolbar {
+  display: grid !important;
+  grid-template-columns: auto minmax(180px, 1fr) auto auto;
+  align-items: center;
+  min-height: 44px;
+  padding: 0.5rem 0;
+  gap: 0.5rem;
+}
+
+.scanner-root-label {
+  flex: 0 0 auto;
+  color: #111827;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.scanner-root-input {
+  min-width: 0;
+  height: 32px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  color: #0f172a;
+  padding: 0 0.7rem;
+  font-size: 0.86rem;
+}
+
+.scanner-root-input:focus {
+  border-color: #2563eb;
+  outline: 2px solid #bfdbfe;
+}
+
+.scanner-root-message {
+  grid-column: 2 / -1;
+  color: #475569;
+  font-size: 0.82rem;
+  min-width: 0;
+}
+
+.scanner-root-toolbar .error-banner {
+  grid-column: 2 / -1;
+  margin-left: 0;
 }
 
 .error-banner {
@@ -192,4 +253,346 @@
 .excludes-input-row input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.material-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 28px 16px;
+  background: rgba(17, 24, 39, 0.68);
+}
+
+.material-modal {
+  width: min(800px, calc(100vw - 32px));
+  max-height: calc(100vh - 56px);
+  overflow: hidden;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.35);
+}
+
+.material-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.material-modal-header h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.material-close-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #1f2937;
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.material-close-btn:hover {
+  background: #eff6ff;
+}
+
+.material-modal-body {
+  max-height: calc(100vh - 126px);
+  overflow: auto;
+  padding: 18px 24px 24px;
+}
+
+.material-muted {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.material-alert {
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+}
+
+.material-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: #475569;
+  font-size: 0.9rem;
+}
+
+.material-summary span {
+  padding: 4px 0;
+}
+
+.material-section {
+  margin-top: 14px;
+}
+
+.material-section-title {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  margin-bottom: 8px;
+  color: #111827;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.material-erp-item {
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+  background: #f8fbff;
+  padding: 10px;
+}
+
+.material-erp-item + .material-erp-item {
+  margin-top: 8px;
+}
+
+.material-erp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 14px;
+  margin-top: 8px;
+}
+
+.material-erp-grid span {
+  display: block;
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.material-erp-grid b {
+  display: block;
+  color: #0f172a;
+  font-size: 0.85rem;
+  word-break: break-word;
+}
+
+.material-folder-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.material-folder-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #0f172a;
+  cursor: pointer;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.material-folder-btn:hover:not(:disabled) {
+  border-color: #60a5fa;
+  background: #eff6ff;
+}
+
+.material-folder-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.material-folder-btn small {
+  color: #64748b;
+}
+
+.material-doc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.material-doc-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.material-doc-row.is-missing {
+  opacity: 0.65;
+}
+
+.material-file-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.material-doc-main {
+  min-width: 0;
+}
+
+.material-doc-main strong,
+.material-doc-main span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material-doc-main strong {
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.material-doc-main span {
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.material-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.material-actions a,
+.material-actions button {
+  min-width: 42px;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #2563eb;
+  cursor: pointer;
+  padding: 5px 9px;
+  text-align: center;
+  text-decoration: none;
+  font-size: 0.8rem;
+}
+
+.material-actions a:hover,
+.material-actions button:hover {
+  background: #eff6ff;
+}
+
+.material-actions .disabled {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+.excel-viewer-section {
+  border-color: #bbf7d0;
+  background: #f8fffb;
+}
+
+.excel-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.excel-viewer-close {
+  width: 30px;
+  height: 30px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.excel-sheet-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.excel-sheet-tabs button {
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #2563eb;
+  cursor: pointer;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+}
+
+.excel-sheet-tabs button.active {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.excel-table-wrap {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.excel-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.excel-table td {
+  max-width: 260px;
+  border: 1px solid #e2e8f0;
+  padding: 5px 8px;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .material-modal-overlay {
+    padding: 12px;
+  }
+
+  .material-modal {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+
+  .material-modal-body {
+    max-height: calc(100vh - 94px);
+    padding: 14px;
+  }
+
+  .material-doc-row {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .material-actions {
+    grid-column: 2;
+  }
 }

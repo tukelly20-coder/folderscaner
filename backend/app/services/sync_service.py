@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from fastapi import FastAPI
+from sqlalchemy import inspect, text
 
 from app.config import settings
 from app.database.database import SessionLocal, engine, Base
@@ -17,6 +18,29 @@ logger = logging.getLogger(__name__)
 def create_tables():
     """Create all database tables (no Alembic in dev / Phase 1)."""
     Base.metadata.create_all(bind=engine)
+    migrate_folder_cache_columns()
+
+
+def migrate_folder_cache_columns():
+    """Add lightweight document-cache columns to existing deployments."""
+    inspector = inspect(engine)
+    if "folders" not in inspector.get_table_names():
+        return
+
+    existing = {column["name"] for column in inspector.get_columns("folders")}
+    wanted = {
+        "source_mtime": "DATETIME",
+        "document_scanned_at": "DATETIME",
+        "customer_name": "VARCHAR",
+        "customer_subfolder_name": "VARCHAR",
+        "salesperson_name": "VARCHAR",
+        "drawing_codes_json": "TEXT",
+    }
+
+    with engine.begin() as conn:
+        for column, column_type in wanted.items():
+            if column not in existing:
+                conn.execute(text(f"ALTER TABLE folders ADD COLUMN {column} {column_type}"))
 
 
 async def lifespan(app: FastAPI):

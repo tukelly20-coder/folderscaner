@@ -7,16 +7,27 @@ import asyncio
 import datetime
 import logging
 import os
+import re
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.config import normalize_smb_root, settings
 from app.models.folder import Folder, FolderStatus
 from app.models.folder_event import FolderEvent, FolderEventType
 from app.websocket.manager import ws_manager
 
 logger = logging.getLogger(__name__)
+PROJECT_FOLDER_PATTERN = re.compile(
+    r"^[A-Z][A-Z0-9]{0,7}-\d{2}(0[1-9]|1[0-2])-\d{3}(?:$|[-_\s])",
+    re.IGNORECASE,
+)
+YEAR_FOLDER_PATTERN = re.compile(r"^\d{4}$")
+MONTH_FOLDER_PATTERN = re.compile(
+    r"^(?:(?:0?[1-9]|1[0-2])\s*(?:月|thang|tháng|month)?|(?:thang|tháng|month)\s*(?:0?[1-9]|1[0-2]))$",
+    re.IGNORECASE,
+)
+MAX_PROJECT_SEARCH_DEPTH = 4
 
 
 def _normalize_path(p: str) -> str:
@@ -30,9 +41,65 @@ def _relative_path(root: str, full: str) -> str:
     return _normalize_path(rel)
 
 
+def _same_parent(path: str, parent: str) -> bool:
+    """Return True when *path* is a direct child of *parent*."""
+    normalized_path = _normalize_path(path)
+    normalized_parent = _normalize_path(parent)
+    path_parent = _normalize_path(os.path.dirname(normalized_path))
+    return path_parent.rstrip("/") == normalized_parent.rstrip("/")
+
+
+def _is_drive_root(root: str) -> bool:
+    normalized = _normalize_path(normalize_smb_root(root))
+    return len(normalized) == 3 and normalized[1:] == ":/"
+
+
+def _compare_root(root: str) -> str:
+    normalized = _normalize_path(normalize_smb_root(root))
+    if len(normalized) == 3 and normalized[1:] == ":/":
+        return normalized
+    return normalized.rstrip("/")
+
+
+def _relative_parts(root: str, full_path: str) -> list[str]:
+    root_cmp = _compare_root(root)
+    full = _normalize_path(full_path)
+    prefix = root_cmp if root_cmp.endswith("/") else f"{root_cmp}/"
+    if not full.startswith(prefix):
+        return []
+    rel = full[len(prefix):].strip("/")
+    return [part for part in rel.split("/") if part]
+
+
 def _parse_excludes(raw: str) -> list:
     """Parse a comma-separated string of folder names into a list."""
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _is_project_folder(name: str) -> bool:
+    return bool(PROJECT_FOLDER_PATTERN.match(name.strip()))
+
+
+def _is_year_folder(name: str) -> bool:
+    return bool(YEAR_FOLDER_PATTERN.match(name.strip()))
+
+
+def _is_month_folder(name: str) -> bool:
+    return bool(MONTH_FOLDER_PATTERN.match(name.strip()))
+
+
+def _is_scoped_project_path(root: str, full_path: str) -> bool:
+    if _is_drive_root(root):
+        return _same_parent(full_path, root)
+
+    parts = _relative_parts(root, full_path)
+    if not parts or len(parts) > MAX_PROJECT_SEARCH_DEPTH:
+        return False
+    if not _is_project_folder(parts[-1]):
+        return False
+
+    containers = parts[:-1]
+    return all(_is_year_folder(part) or _is_month_folder(part) for part in containers)
 
 
 class FolderScanner:
@@ -40,7 +107,7 @@ class FolderScanner:
 
     def __init__(self, db: Session, smb_root: Optional[str] = None, excludes: Optional[list] = None):
         self.db = db
-        self.smb_root = (smb_root or settings.SMB_ROOT).rstrip("/\\")
+        self.smb_root = normalize_smb_root(smb_root or settings.SMB_ROOT)
         raw_excludes = excludes or _parse_excludes(settings.SMB_EXCLUDES)
         self.excludes = {e.strip() for e in raw_excludes if e.strip()}
         self._running = False
@@ -55,6 +122,7 @@ class FolderScanner:
             "deleted": 0,
             "renamed": 0,
             "modified": 0,
+            "document_cache_updated": 0,
             "errors": [],
         }
 
@@ -82,10 +150,12 @@ class FolderScanner:
             # 2. Detect creations and modifications (filesystem entries)
             for fs_path, fs_info in fs_folders.items():
                 if fs_path not in db_map:
-                    self._handle_create(fs_path, fs_info, summary)
+                    folder = self._handle_create(fs_path, fs_info, summary)
+                    self._refresh_document_cache(folder, fs_info, summary)
                 else:
                     db_folder = db_map[fs_path]
                     self._handle_maybe_modify(db_folder, fs_info, summary)
+                    self._refresh_document_cache(db_folder, fs_info, summary)
 
             self.db.commit()
         except Exception as exc:
@@ -128,22 +198,11 @@ class FolderScanner:
         result: Dict[str, dict] = {}
         root = self.smb_root
 
-        try:
-            entries = os.scandir(root)
-        except Exception as exc:
-            logger.error("Cannot scan %s: %s", root, exc)
-            raise
-
-        for entry in entries:
+        def add_project_entry(entry) -> None:
             try:
                 stat = entry.stat()
             except OSError:
-                continue
-            if not entry.is_dir():
-                continue
-            if entry.name in self.excludes:
-                logger.info("Skipping excluded folder: %s", entry.path)
-                continue
+                return
             rel = _relative_path(root, entry.path)
             full = _normalize_path(entry.path)
             result[rel] = {
@@ -155,14 +214,63 @@ class FolderScanner:
                 "is_dir": True,
             }
 
+        def should_enter_container(name: str, depth: int) -> bool:
+            if depth >= MAX_PROJECT_SEARCH_DEPTH - 1:
+                return False
+            if _is_drive_root(root):
+                return False
+            if depth == 0:
+                return _is_year_folder(name) or _is_month_folder(name)
+            return _is_year_folder(name) or _is_month_folder(name)
+
+        def scan_container(path: str, depth: int) -> None:
+            try:
+                with os.scandir(path) as entries:
+                    for entry in entries:
+                        if not entry.is_dir():
+                            continue
+                        if entry.name in self.excludes:
+                            logger.info("Skipping excluded folder: %s", entry.path)
+                            continue
+                        if _is_project_folder(entry.name):
+                            add_project_entry(entry)
+                            continue
+                        if should_enter_container(entry.name, depth):
+                            scan_container(entry.path, depth + 1)
+                        else:
+                            logger.info("Skipping non-project folder: %s", entry.path)
+            except OSError as exc:
+                logger.warning("Cannot scan folder %s: %s", path, exc)
+
+        try:
+            scan_container(root, 0)
+        except Exception as exc:
+            logger.error("Cannot scan %s: %s", root, exc)
+            raise
+
         return result
 
     # ---- database helpers ----
 
     def _load_db_map(self) -> Dict[str, Folder]:
-        """Return {relative_path: Folder} for all folders (active and deleted)."""
-        folders = self.db.query(Folder).all()
-        return {f.relative_path: f for f in folders}
+        """Return {relative_path: Folder} for folders inside the active scan root."""
+        folders = (
+            self.db.query(Folder)
+            .filter(Folder.absolute_path.like(f"{_normalize_path(self.smb_root).rstrip('/')}/%"))
+            .all()
+        )
+        folders = [
+            folder
+            for folder in folders
+            if _is_scoped_project_path(self.smb_root, folder.absolute_path or "")
+        ]
+        mapped: Dict[str, Folder] = {}
+        for folder in folders:
+            if folder.absolute_path:
+                mapped[_relative_path(self.smb_root, folder.absolute_path)] = folder
+            elif folder.relative_path:
+                mapped[folder.relative_path] = folder
+        return mapped
 
     # ---- change handlers ----
 
@@ -188,7 +296,7 @@ class FolderScanner:
 
     def _handle_create(
         self, rel_path: str, info: dict, summary: Dict
-    ) -> None:
+    ) -> Folder:
         """Handle a newly discovered folder."""
         folder = Folder(
             name=info["name"],
@@ -210,6 +318,7 @@ class FolderScanner:
         )
         summary["created"] += 1
         self._notify("folder_created", folder)
+        return folder
 
     def _handle_delete(self, folder: Folder, summary: Dict) -> None:
         """Soft-delete a folder that no longer exists on disk."""
@@ -258,10 +367,13 @@ class FolderScanner:
         self, folder: Folder, info: dict, summary: Dict
     ) -> None:
         """Check if an existing folder was modified on disk."""
+        folder.last_seen = datetime.datetime.utcnow()
         if folder.status == FolderStatus.DELETED:
             folder.status = FolderStatus.ACTIVE
             folder.name = info["name"]
+            folder.relative_path = info["relative_path"]
             folder.absolute_path = info["absolute_path"]
+            folder.parent_id = self._resolve_parent(info["relative_path"])
             folder.updated_at = datetime.datetime.utcnow()
             self.db.add(folder)
             self._log_event(
@@ -300,6 +412,20 @@ class FolderScanner:
             )
             summary["modified"] += 1
             self._notify("folder_modified", folder)
+
+    def _refresh_document_cache(self, folder: Folder, info: dict, summary: Dict) -> None:
+        """Refresh expensive document metadata only when folder mtime changed."""
+        try:
+            from app.services.document_scanner import DocumentScanner
+
+            if DocumentScanner(self.smb_root).update_folder_cache(folder, info.get("mtime")):
+                summary["document_cache_updated"] += 1
+        except Exception as exc:
+            logger.warning(
+                "Document cache refresh failed for %s: %s",
+                getattr(folder, "relative_path", ""),
+                exc,
+            )
 
     def _resolve_parent(self, rel_path: str) -> Optional[int]:
         """Return the DB id of the parent folder, if it exists."""

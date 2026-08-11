@@ -54,3 +54,13 @@
   padding: 2rem;
   overflow: auto;
 }
+
+.app-container.embedded {
+  min-height: 100vh;
+  background: #ffffff;
+}
+
+.app-container.embedded .app-main {
+  padding: 0;
+  overflow: hidden;
+}

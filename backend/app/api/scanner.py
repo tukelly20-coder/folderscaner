@@ -2,9 +2,9 @@
 REST API endpoints for scanner control.
 """
 
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -32,10 +32,11 @@ def scanner_status():
 
 @router.post("/scan")
 def trigger_scan(
+    root: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """POST /api/scanner/scan — Trigger a manual scan of the filesystem."""
-    scanner = FolderScanner(db=db)
+    scanner = FolderScanner(db=db, smb_root=root or None)
     summary = scanner.scan_once()
     return {"success": True, "results": summary}
 

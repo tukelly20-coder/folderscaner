@@ -12,9 +12,9 @@ services:
       - SMB_PASSWORD=${SMB_PASSWORD}
       - SCAN_INTERVAL=${SCAN_INTERVAL:-10}
       - SERVER_HOST=0.0.0.0
-      - SERVER_PORT=8000
-    ports:
-      - "8000:8000"
+      - SERVER_PORT=18001
+    expose:
+      - "18001"
     volumes:
       - ./backend/data:/app/data
       - ./backend/exports:/app/exports
@@ -26,7 +26,7 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
     ports:
-      - "80:80"
+      - "8001:80"
     depends_on:
       - backend
     restart: unless-stopped

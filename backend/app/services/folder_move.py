@@ -16,7 +16,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.config import normalize_smb_root, settings
 from app.models.folder import Folder, FolderStatus
 from app.models.folder_event import FolderEvent, FolderEventType
 from app.websocket.manager import ws_manager
@@ -153,7 +153,7 @@ class FolderMoveService:
         validated_rel = _validate_relative_path(new_relative_path, settings.SMB_ROOT)
 
         # 5. Build the absolute target path (parent_dir / leaf_name)
-        smb_root = settings.SMB_ROOT.rstrip("/\\")
+        smb_root = normalize_smb_root(settings.SMB_ROOT)
         target_abs = os.path.join(smb_root, *validated_rel.split("/"))
         # If the user provided a new name, the leaf must equal that name.
         # If they did not, the existing name is the leaf → validated_rel's last
@@ -211,6 +211,19 @@ class FolderMoveService:
         folder.absolute_path = target_abs.replace("\\", "/")
         folder.parent_id = self._resolve_parent(validated_rel)
         folder.updated_at = datetime.datetime.utcnow()
+        folder.source_mtime = None
+        folder.document_scanned_at = None
+        folder.customer_name = None
+        folder.customer_subfolder_name = None
+        folder.salesperson_name = None
+        folder.drawing_codes_json = "[]"
+
+        try:
+            from app.services.document_scanner import DocumentScanner
+
+            DocumentScanner(normalize_smb_root(settings.SMB_ROOT)).update_folder_cache(folder, force=True)
+        except Exception as exc:
+            logger.warning("Document cache refresh failed after move: %s", exc)
 
         event = FolderEvent(
             folder_id=folder.id,

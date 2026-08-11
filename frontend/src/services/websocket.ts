@@ -15,7 +15,7 @@ class WSClient {
   connect(baseUrl?: string): void {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = baseUrl || window.location.host;
-    const url = `${proto}//${host}/ws/folders`;
+    const url = `${proto}//${host}/scanner-ws/folders`;
 
     this.ws = new WebSocket(url);
 

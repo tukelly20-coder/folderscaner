@@ -1,7 +1,8 @@
-﻿import datetime
+import datetime
 import enum
+import json
 
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.database.database import Base
@@ -40,6 +41,12 @@ class Folder(Base):
         default=datetime.datetime.utcnow,
         onupdate=datetime.datetime.utcnow,
     )
+    source_mtime = Column(DateTime, nullable=True)
+    document_scanned_at = Column(DateTime, nullable=True)
+    customer_name = Column(String, nullable=True)
+    customer_subfolder_name = Column(String, nullable=True)
+    salesperson_name = Column(String, nullable=True)
+    drawing_codes_json = Column(Text, nullable=True)
 
     parent = relationship(
         "Folder",
@@ -51,3 +58,13 @@ class Folder(Base):
         back_populates="folder",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def drawing_codes(self) -> list[str]:
+        if not self.drawing_codes_json:
+            return []
+        try:
+            parsed = json.loads(self.drawing_codes_json)
+            return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            return []

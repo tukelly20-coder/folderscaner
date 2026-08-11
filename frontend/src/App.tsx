@@ -5,24 +5,27 @@ import './App.css';
 
 function App() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const isEmbedded = new URLSearchParams(window.location.search).get('embed') === '1';
 
   const handleRefresh = useCallback(() => {
     setRefreshTrigger((prev) => prev + 1);
   }, []);
 
   return (
-    <div className="app-container">
-      <header className="app-header">
-        <h1>Folder Sync System</h1>
-        <div className="app-header-actions">
-          <nav>
-            <Link to="/">Dashboard</Link>
-          </nav>
-          <button onClick={handleRefresh} className="refresh-btn">
-            Refresh
-          </button>
-        </div>
-      </header>
+    <div className={`app-container${isEmbedded ? ' embedded' : ''}`}>
+      {!isEmbedded && (
+        <header className="app-header">
+          <h1>Folder Sync System</h1>
+          <div className="app-header-actions">
+            <nav>
+              <Link to="/">Dashboard</Link>
+            </nav>
+            <button onClick={handleRefresh} className="refresh-btn">
+              Refresh
+            </button>
+          </div>
+        </header>
+      )}
       <main className="app-main">
         <Routes>
           <Route path="/" element={<Dashboard refreshTrigger={refreshTrigger} />} />

@@ -19,7 +19,7 @@ import subprocess
 import sys
 
 FRONTEND_DIR = Path(__file__).parent / "frontend" / "dist"
-BACKEND_URL = "http://localhost:8000"
+BACKEND_URL = "http://127.0.0.1:18001"
 
 
 class ProxyHandler(SimpleHTTPRequestHandler):
@@ -95,7 +95,7 @@ class ProxyHandler(SimpleHTTPRequestHandler):
 
 
 def main():
-    port = 5173
+    port = 8001
     print("  This script is deprecated as a standalone entry point.")
     print("  Starting via: python startserver.py --proxy")
     server = HTTPServer(("0.0.0.0", port), ProxyHandler)

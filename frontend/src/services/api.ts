@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/scanner-api',
   timeout: 15000,
 });
 
@@ -58,6 +58,7 @@ export const fetchFolders = (params?: {
   skip?: number;
   limit?: number;
   status_filter?: string;
+  root?: string;
 }) => api.get<FolderRead[]>('/folders', { params });
 
 export const fetchFolder = (id: number) =>
@@ -108,13 +109,79 @@ export interface DocumentScanResponse {
   results: DocumentScanResult[];
 }
 
+export interface MaterialErpInfo {
+  source?: string;
+  message?: string;
+  rows?: Array<{
+    sheet?: string;
+    values?: Record<string, string>;
+  }>;
+}
+
+export interface MaterialDocumentFolder {
+  name: string;
+  exists: boolean;
+  file_count: number;
+  list_url: string;
+}
+
+export interface MaterialDocumentItem {
+  name: string;
+  type: 'folder' | 'pdf' | 'drawing' | 'bom' | 'cad' | 'file';
+  folder_name?: string;
+  exists: boolean;
+  view_url: string;
+  download_url: string;
+}
+
+export interface MaterialFolderEntry extends MaterialDocumentItem {
+  is_dir: boolean;
+  list_url?: string;
+  size?: number;
+  modified_at?: string;
+}
+
+export interface MaterialFolderResponse {
+  folder_name: string;
+  entries: MaterialFolderEntry[];
+  total?: number;
+  truncated?: boolean;
+}
+
+export interface MaterialDocumentsResponse {
+  success: boolean;
+  code: string;
+  resolved_code?: string;
+  message?: string;
+  documents: MaterialDocumentItem[];
+  folders: MaterialDocumentFolder[];
+  erp_info?: MaterialErpInfo;
+}
+
 export const scanDocuments = (root?: string) =>
   api.post<DocumentScanResponse>('/documents/scan', null, {
     params: root ? { root } : undefined,
   });
 
-export const triggerScan = () =>
-  api.post<{ success: boolean; results: any }>('/scanner/scan');
+export const fetchMaterialDocuments = (code: string) =>
+  axios.get<MaterialDocumentsResponse>(
+    `/api/materials/${encodeURIComponent(code)}/documents`,
+    { timeout: 30000 },
+  );
+
+export const fetchPlanFolderDocuments = (folderId: number) =>
+  api.get<MaterialDocumentsResponse>(`/documents/folders/${folderId}`, {
+    timeout: 30000,
+  });
+
+export const fetchMaterialFolder = (listUrl: string) =>
+  axios.get<MaterialFolderResponse>(listUrl, { timeout: 30000 });
+
+export const triggerScan = (root?: string) =>
+  api.post<{ success: boolean; results: any }>('/scanner/scan', null, {
+    params: root ? { root } : undefined,
+    timeout: 30000,
+  });
 
 export const exportFoldersExcel = () => {
   window.open('/api/folders/export/excel', '_blank');

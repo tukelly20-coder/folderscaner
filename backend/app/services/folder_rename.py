@@ -17,7 +17,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.config import normalize_smb_root, settings
 from app.models.folder import Folder, FolderStatus
 from app.models.folder_event import FolderEvent, FolderEventType
 from app.websocket.manager import ws_manager
@@ -191,9 +191,22 @@ class FolderRenameService:
 
         # 7. ONLY on success: update database
         folder.name = validated
-        folder.relative_path = _compute_relative(settings.SMB_ROOT, new_path)
+        folder.relative_path = _compute_relative(normalize_smb_root(settings.SMB_ROOT), new_path)
         folder.absolute_path = new_path.replace("\\", "/")
         folder.updated_at = datetime.datetime.utcnow()
+        folder.source_mtime = None
+        folder.document_scanned_at = None
+        folder.customer_name = None
+        folder.customer_subfolder_name = None
+        folder.salesperson_name = None
+        folder.drawing_codes_json = "[]"
+
+        try:
+            from app.services.document_scanner import DocumentScanner
+
+            DocumentScanner(normalize_smb_root(settings.SMB_ROOT)).update_folder_cache(folder, force=True)
+        except Exception as exc:
+            logger.warning("Document cache refresh failed after rename: %s", exc)
 
         event = FolderEvent(
             folder_id=folder.id,
