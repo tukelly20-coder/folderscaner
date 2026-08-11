@@ -185,27 +185,35 @@ Mở file `.env` và thiết lập `SMB_ROOT` với đường dẫn chia sẻ m�
 
 Nếu chia sẻ yêu cầu xác thực, điền `SMB_USERNAME`, `SMB_PASSWORD` và `SMB_DOMAIN`.
 
-### 2. Khởi chạy Backend
+### 2. Khởi chạy hệ thống
+
+Hệ thống cung cấp một điểm vào duy nhất để khởi chạy cả backend và frontend cùng lúc.
 
 ```bash
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+python startserver.py
 ```
 
-Tài liệu API tương tác có sẵn tại: http://localhost:8000/docs
+Lệnh trên sẽ:
+- Khởi chạy backend (FastAPI/uvicorn) ở cổng `8000`.
+- Khởi chạy frontend (Vite dev server) ở cổng `5173`.
+- Tự động dừng tất cả tiến trình con khi nhấn `Ctrl+C`.
 
-### 3. Khởi chạy Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
+Tài liệu API tương tác có sẵn tại: http://localhost:8000/docs  
 Giao diện Web chạy tại: http://localhost:5173
 
-### 4. Chạy với Docker
+#### Các chế độ khác
+
+| Lệnh | Mô tả |
+|------|-------|
+| `python startserver.py` | Khởi chạy backend + frontend (Vite dev) — mặc định |
+| `python startserver.py --proxy` | Khởi chạy backend + proxy Python (phục vụ `frontend/dist`, không cần Node.js) |
+| `python startserver.py --backend` | Chỉ khởi chạy backend |
+| `python startserver.py --frontend` | Chỉ khởi chạy frontend (Vite) |
+| `python startserver.py --stop` | Dừng tất cả tiến trình đã khởi chạy |
+
+> **Lưu ý:** Nếu sử dụng chế độ `--proxy`, cần build frontend trước bằng `npm run build` trong thư mục `frontend/` để tạo ra thư mục `frontend/dist`.
+
+### 3. Chạy với Docker
 
 ```bash
 docker-compose up -d
