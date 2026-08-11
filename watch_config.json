@@ -1,0 +1,8 @@
+{
+  "watch_dir": "D:\\3. P002-黄庭字_Hoàng Đình Tự\\2026",
+  "log_file": "C:\\Users\\Kelly\\Desktop\\Repo\\folderscaner\\watch_folder.log",
+  "recursive": true,
+  "ignore_patterns": [
+    "*.tmp", "*.log"
+  ]
+}

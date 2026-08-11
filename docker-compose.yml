@@ -1,0 +1,47 @@
+﻿version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      - DATABASE_URL=sqlite:////app/data/folders.db
+      - SMB_ROOT=${SMB_ROOT}
+      - SMB_USERNAME=${SMB_USERNAME}
+      - SMB_PASSWORD=${SMB_PASSWORD}
+      - SCAN_INTERVAL=${SCAN_INTERVAL:-10}
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/exports:/app/exports
+      - ${SMB_ROOT:-.}:/smb:ro
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-folder_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-folder_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-folder_sync}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

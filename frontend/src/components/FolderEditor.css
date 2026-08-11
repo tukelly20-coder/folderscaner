@@ -1,0 +1,105 @@
+.folder-editor {
+  padding: 0.75rem;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.mode-switcher {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f3f4f6;
+}
+
+.mode-switcher button {
+  flex: 1;
+  padding: 0.4rem 0.75rem;
+  border: none;
+  background: transparent;
+  font-size: 0.85rem;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.mode-switcher button.active {
+  background: #2563eb;
+  color: white;
+  font-weight: 600;
+}
+
+.mode-switcher button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.editor-field {
+  margin-bottom: 0.5rem;
+}
+
+.editor-field label {
+  display: block;
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-bottom: 0.25rem;
+}
+
+.editor-field input {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.editor-field input.invalid {
+  border-color: #ef4444;
+}
+
+.editor-field input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.error-msg {
+  color: #ef4444;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+  display: block;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.editor-actions button {
+  padding: 0.4rem 1rem;
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.editor-actions button.primary {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+}
+
+.editor-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin: 0.25rem 0 0.5rem;
+  line-height: 1.4;
+}

@@ -1,0 +1,74 @@
+.event-history {
+  margin-top: 1rem;
+}
+
+.event-history h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  color: #374151;
+}
+
+.event-table {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 0.85rem;
+}
+
+.event-header,
+.event-row {
+  display: grid;
+  grid-template-columns: 160px 100px 1fr 100px;
+  padding: 0.5rem 0.75rem;
+  align-items: center;
+}
+
+.event-header {
+  background: #f3f4f6;
+  font-weight: 600;
+  color: #374151;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.event-row {
+  border-top: 1px solid #e5e7eb;
+}
+
+.event-row:nth-child(even) {
+  background: #fafafa;
+}
+
+.col-time {
+  color: #6b7280;
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+
+.col-type.badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+.col-folder {
+  color: #1f2937;
+}
+
+.col-user {
+  color: #6b7280;
+  text-align: right;
+}
+
+.event-history.error {
+  color: #ef4444;
+  padding: 1rem;
+}
+
+.event-history.empty {
+  color: #6b7280;
+  padding: 1rem;
+}

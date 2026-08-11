@@ -1,0 +1,8 @@
+﻿fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+sqlalchemy>=2.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+smbprotocol>=1.16.0
+pandas>=2.0.0
+openpyxl>=3.1.0
