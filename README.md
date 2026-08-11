@@ -1,62 +1,61 @@
-﻿# Folder Sync & Excel-like Data Management System
+﻿# Hệ Thống Đồng Bộ và Quản Lý Dữ liệu Thư Mục Dạng Excel
 
-## Overview
+## Tổng quan
 
-A two-way folder synchronization system that monitors SMB/UNC shares, stores
-folder metadata in a database, and provides a real-time Excel-like web interface
-for viewing and editing folder structures.
+Hệ thống đồng bộ hai chiều thư mục theo dõi chia sẻ SMB/UNC, lưu trữ siêu dữ liệu thư mục vào cơ sở dữ liệu,
+và cung cấp giao diện web thời gian thực giống Excel để xem và chỉnh sửa cấu trúc thư mục.
 
-## Quick Start
+## Bắt đầu nhanh
 
-### Prerequisites
+### Yêu cầu hệ thống
 - Python 3.10+
 - Node.js 20+
-- Docker & Docker Compose (optional)
+- Docker & Docker Compose (tùy chọn)
 
-### 1. Configure Environment
+### 1. Cấu hình môi trường
 ```bash
 cp .env.example .env
 ```
-Edit `.env` to set your `SMB_ROOT` (e.g. `C:/shared/project` or `\\LOCAL-PC\PROJECT`).
+Chỉnh sửa file `.env` để thiết lập `SMB_ROOT` (ví dụ: `C:/shared/project` hoặc `\\LOCAL-PC\PROJECT`).
 
-### 2. Backend
+### 2. Khởi chạy Backend
 ```bash
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
-API docs: http://localhost:8000/docs
+Tài liệu API: http://localhost:8000/docs
 
-### 3. Frontend
+### 3. Khởi chạy Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-Web UI: http://localhost:5173
+Giao diện web: http://localhost:5173
 
-### 4. Docker (Production)
+### 4. Chạy với Docker (môi trường sản phẩm)
 ```bash
 docker-compose up -d
 ```
 
-## Configuration
+## Cấu hình
 
-| Variable       | Default              | Description                        |
-|----------------|---------------------|------------------------------------|
-| DATABASE_URL  | sqlite:///./folders.db | Database connection string  |
-| SMB_ROOT       | *(required)*        | Path to the shared folder         |
-| SCAN_INTERVAL  | 5                  | Scanner polling interval (seconds) |
-| SERVER_HOST    | 0.0.0.0            | FastAPI host                       |
-| SERVER_PORT    | 8000               | FastAPI port                       |
-| SMB_USERNAME   | *(optional)*       | SMB username                       |
-| SMB_PASSWORD   | *(optional)*       | SMB password                       |
-| EXPORT_DIR     | ./exports         | Export directory                   |
+| Biến số        | Mặc định              | Mô tả                            |
+|----------------|-----------------------|----------------------------------|
+| DATABASE_URL   | sqlite:///./folders.db | Chuỗi kết nối cơ sở dữ liệu     |
+| SMB_ROOT       | *(bắt buộc)*          | Đường dẫn thư mục chia sẻ        |
+| SCAN_INTERVAL  | 5                     | Khoảng thời gian quét (giây)    |
+| SERVER_HOST    | 0.0.0.0               | Host của FastAPI                 |
+| SERVER_PORT    | 8000                  | Port của FastAPI                 |
+| SMB_USERNAME   | *(tùy chọn)*           | Tên người dùng SMB               |
+| SMB_PASSWORD   | *(tùy chọn)*           | Mật khẩu SMB                    |
+| EXPORT_DIR     | ./exports             | Thư mục xuất file                |
 
-## Architecture
+## Kiến trúc
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design document.
+Xem [ARCHITECTURE.md](ARCHITECTURE.md) để biết thêm thông tin chi tiết về thiết kế hệ thống.
 
-## License
+## Giấy phép
 
 MIT
