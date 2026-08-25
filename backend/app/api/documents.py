@@ -12,9 +12,9 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.database.database import get_db
 from app.models.folder import Folder
+from app.models.user_smb_root import UserSmbRoot
 from app.schemas.document_scan import DocumentScanResponse
 from app.services.document_scanner import DocumentScanner
 
@@ -27,6 +27,17 @@ PLAN_FILE_EXCLUDES = {
     ".svn",
     "thumbs.db",
 }
+
+PLAN_FILE_EXCLUDED_EXTENSIONS = {
+    ".py",
+    ".pyc",
+    ".pyo",
+}
+
+
+def _is_plan_file_excluded(name: str) -> bool:
+    lowered = name.lower()
+    return lowered in PLAN_FILE_EXCLUDES or os.path.splitext(lowered)[1] in PLAN_FILE_EXCLUDED_EXTENSIONS
 
 
 def _classify_plan_file(path: str, is_dir: bool = False) -> str:
@@ -82,7 +93,7 @@ def _api_url(folder_id: int, route: str, rel: str = "", download: bool = False) 
 def _count_visible_children(path: str) -> int:
     try:
         with os.scandir(path) as scan:
-            return sum(1 for entry in scan if entry.name.lower() not in PLAN_FILE_EXCLUDES)
+            return sum(1 for entry in scan if not _is_plan_file_excluded(entry.name))
     except OSError:
         return 0
 
@@ -96,7 +107,7 @@ def _list_plan_folder_entries(folder: Folder, rel: str = "", limit: int = 300) -
     try:
         with os.scandir(target) as scan:
             for entry in scan:
-                if entry.name.lower() in PLAN_FILE_EXCLUDES:
+                if _is_plan_file_excluded(entry.name):
                     continue
 
                 try:
@@ -128,11 +139,25 @@ def _list_plan_folder_entries(folder: Folder, rel: str = "", limit: int = 300) -
 @router.post("/scan", response_model=DocumentScanResponse)
 def scan_documents(
     root: str | None = Query(default=None),
+    user_key: str | None = Query(default=None),
     force: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
     """Incrementally scan A0 folders and update cached document metadata."""
-    scan_root = root or settings.SMB_ROOT
+    _ = root
+    if not user_key:
+        raise HTTPException(status_code=400, detail="Missing user_key")
+
+    cleaned_user = user_key.strip()[:255]
+    saved = (
+        db.query(UserSmbRoot)
+        .filter(UserSmbRoot.user_key == cleaned_user, UserSmbRoot.active == True)
+        .first()
+    )
+    scan_root = saved.smb_root if saved else ""
+    if not scan_root:
+        raise HTTPException(status_code=400, detail="Missing SMB root for this user")
+
     scanner = DocumentScanner(smb_root=scan_root)
     results = scanner.scan(db=db, force=force)
     return DocumentScanResponse(
@@ -203,11 +228,9 @@ def get_plan_document_file(
     if not os.path.isfile(target):
         raise HTTPException(status_code=404, detail="File not found")
 
-    headers = {}
-    if download:
-        headers["Content-Disposition"] = f'attachment; filename="{os.path.basename(target)}"'
     return FileResponse(
         target,
         media_type=mimetypes.guess_type(target)[0] or "application/octet-stream",
-        headers=headers,
+        filename=os.path.basename(target),
+        content_disposition_type="attachment" if download else "inline",
     )

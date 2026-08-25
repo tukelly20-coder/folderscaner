@@ -1,11 +1,13 @@
 import React, { useState, useCallback } from 'react';
 import { Routes, Route, Link } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
+import ExcelPreview from './pages/ExcelPreview';
 import './App.css';
 
 function App() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const isEmbedded = new URLSearchParams(window.location.search).get('embed') === '1';
+  const isPreview = window.location.pathname.includes('/excel-preview');
 
   const handleRefresh = useCallback(() => {
     setRefreshTrigger((prev) => prev + 1);
@@ -13,7 +15,7 @@ function App() {
 
   return (
     <div className={`app-container${isEmbedded ? ' embedded' : ''}`}>
-      {!isEmbedded && (
+      {!isEmbedded && !isPreview && (
         <header className="app-header">
           <h1>Folder Sync System</h1>
           <div className="app-header-actions">
@@ -29,6 +31,7 @@ function App() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<Dashboard refreshTrigger={refreshTrigger} />} />
+          <Route path="/excel-preview" element={<ExcelPreview />} />
         </Routes>
       </main>
     </div>

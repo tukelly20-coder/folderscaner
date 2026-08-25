@@ -25,8 +25,9 @@ class Folder(Base):
         nullable=True,
     )
     name = Column(String, nullable=False)
-    relative_path = Column(String, nullable=False, unique=True, index=True)
+    relative_path = Column(String, nullable=False, index=True)
     absolute_path = Column(String, nullable=False, unique=True, index=True)
+    scan_root = Column(String, nullable=True, index=True)
     status = Column(
         Enum(FolderStatus),
         nullable=False,
@@ -42,6 +43,7 @@ class Folder(Base):
         onupdate=datetime.datetime.utcnow,
     )
     source_mtime = Column(DateTime, nullable=True)
+    document_signature = Column(String, nullable=True)
     document_scanned_at = Column(DateTime, nullable=True)
     customer_name = Column(String, nullable=True)
     customer_subfolder_name = Column(String, nullable=True)

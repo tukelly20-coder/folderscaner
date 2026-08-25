@@ -195,6 +195,7 @@ class FolderRenameService:
         folder.absolute_path = new_path.replace("\\", "/")
         folder.updated_at = datetime.datetime.utcnow()
         folder.source_mtime = None
+        folder.document_signature = None
         folder.document_scanned_at = None
         folder.customer_name = None
         folder.customer_subfolder_name = None

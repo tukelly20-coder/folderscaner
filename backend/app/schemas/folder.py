@@ -60,6 +60,7 @@ class FolderRead(FolderBase):
     created_at: datetime
     updated_at: datetime
     source_mtime: Optional[datetime] = None
+    document_signature: Optional[str] = None
     document_scanned_at: Optional[datetime] = None
     children: List["FolderRead"] = []
     events: List[FolderEventRead] = []
@@ -97,6 +98,7 @@ class FolderListResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     source_mtime: Optional[datetime] = None
+    document_signature: Optional[str] = None
     document_scanned_at: Optional[datetime] = None
     customer_name: Optional[str] = None
     customer_subfolder_name: Optional[str] = None

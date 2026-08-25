@@ -87,6 +87,25 @@ export const fetchScannerStatus = () =>
     '/scanner/status',
   );
 
+export interface UserSmbRoot {
+  user_key: string;
+  smb_root: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const fetchUserSmbRoot = (userKey: string) =>
+  api.get<UserSmbRoot | null>('/scanner/user-root', {
+    params: { user_key: userKey },
+  });
+
+export const saveUserSmbRoot = (userKey: string, smbRoot: string) =>
+  api.put<UserSmbRoot | null>('/scanner/user-root', {
+    user_key: userKey,
+    smb_root: smbRoot,
+  });
+
 export const updateScannerExcludes = (excludes: string[]) =>
   api.post<{ success: boolean; excludes: string[]; results: any }>(
     '/scanner/excludes',
@@ -132,6 +151,8 @@ export interface MaterialDocumentItem {
   exists: boolean;
   view_url: string;
   download_url: string;
+  size?: number;
+  modified_at?: string;
 }
 
 export interface MaterialFolderEntry extends MaterialDocumentItem {
@@ -158,9 +179,9 @@ export interface MaterialDocumentsResponse {
   erp_info?: MaterialErpInfo;
 }
 
-export const scanDocuments = (root?: string) =>
+export const scanDocuments = (userKey: string) =>
   api.post<DocumentScanResponse>('/documents/scan', null, {
-    params: root ? { root } : undefined,
+    params: { user_key: userKey },
   });
 
 export const fetchMaterialDocuments = (code: string) =>
@@ -177,9 +198,13 @@ export const fetchPlanFolderDocuments = (folderId: number) =>
 export const fetchMaterialFolder = (listUrl: string) =>
   axios.get<MaterialFolderResponse>(listUrl, { timeout: 30000 });
 
-export const triggerScan = (root?: string) =>
+export const triggerScan = (root?: string, forceDocuments = true, userKey?: string) =>
   api.post<{ success: boolean; results: any }>('/scanner/scan', null, {
-    params: root ? { root } : undefined,
+    params: {
+      ...(root ? { root } : {}),
+      ...(userKey ? { user_key: userKey } : {}),
+      force_documents: forceDocuments,
+    },
     timeout: 30000,
   });
 

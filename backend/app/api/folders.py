@@ -14,6 +14,7 @@ from urllib.parse import quote
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.config import normalize_smb_root
@@ -22,11 +23,20 @@ from app.models.folder import Folder, FolderStatus
 from app.schemas.folder import FolderRead, FolderUpdate, FolderMove
 from app.services.folder_move import FolderMoveService, MoveError
 from app.services.folder_rename import FolderRenameService, RenameError
+from app.services.project_sync import sync_folder_to_main_project
 
 router = APIRouter(prefix="/api/folders", tags=["folders"])
 logger = logging.getLogger(__name__)
 PROJECT_FOLDER_PATTERN = re.compile(
     r"^[A-Z][A-Z0-9]{0,7}-\d{2}(0[1-9]|1[0-2])-\d{3}(?:$|[-_\s])",
+    re.IGNORECASE,
+)
+PROJECT_CODE_PATTERN = re.compile(
+    r"^([A-Z][A-Z0-9]{0,7}-\d{2}(?:0[1-9]|1[0-2])-\d{3}(?:-[A-Z]\d+)?)",
+    re.IGNORECASE,
+)
+COPY_SUFFIX_PATTERN = re.compile(
+    r"(?:[-_\s]*(?:副本|复件|复制|copy|copie|duplicate)(?:\s*\(\d+\))?)+$",
     re.IGNORECASE,
 )
 YEAR_FOLDER_PATTERN = re.compile(r"^\d{4}$")
@@ -78,6 +88,32 @@ def _is_project_folder(name: str) -> bool:
     return bool(PROJECT_FOLDER_PATTERN.match((name or "").strip()))
 
 
+def _project_code(name: str) -> str:
+    match = PROJECT_CODE_PATTERN.match((name or "").strip())
+    return match.group(1).upper() if match else (name or "").strip().upper()
+
+
+def _strip_copy_suffix(value: str) -> str:
+    previous = ""
+    cleaned = (value or "").strip()
+    while cleaned and cleaned != previous:
+        previous = cleaned
+        cleaned = COPY_SUFFIX_PATTERN.sub("", cleaned).strip(" -_")
+    return cleaned
+
+
+def _folder_spec(name: str) -> str:
+    match = PROJECT_CODE_PATTERN.match((name or "").strip())
+    if not match:
+        return ""
+    return _strip_copy_suffix(name.strip()[len(match.group(1)) :].lstrip("-_ ").strip())
+
+
+def _is_copy_folder_name(name: str) -> bool:
+    raw = (name or "").strip()
+    return bool(raw and _strip_copy_suffix(raw) != raw)
+
+
 def _is_year_folder(name: str) -> bool:
     return bool(YEAR_FOLDER_PATTERN.match((name or "").strip()))
 
@@ -98,6 +134,81 @@ def _is_scoped_project_path(root: str, full_path: str, name: str) -> bool:
 
     containers = parts[:-1]
     return all(_is_year_folder(part) or _is_month_folder(part) for part in containers)
+
+
+def _is_scoped_relative_project_path(relative_path: str, name: str) -> bool:
+    normalized = (relative_path or "").replace("\\", "/").strip("/")
+    parts = [part for part in normalized.split("/") if part]
+    if not parts:
+        return False
+    if not _is_project_folder(name or parts[-1]):
+        return False
+    if len(parts) == 1:
+        return _is_project_folder(parts[0])
+    if len(parts) > MAX_PROJECT_SEARCH_DEPTH:
+        return False
+    return all(_is_year_folder(part) or _is_month_folder(part) for part in parts[:-1])
+
+
+def _folder_freshness(folder: Folder) -> tuple[datetime.datetime, datetime.datetime, int]:
+    return (
+        folder.last_seen or datetime.datetime.min,
+        folder.updated_at or datetime.datetime.min,
+        folder.id or 0,
+    )
+
+
+def _folder_metadata_score(folder: Folder) -> tuple[int, int, int, datetime.datetime]:
+    drawing_codes = getattr(folder, "drawing_codes", []) or []
+    return (
+        1 if folder.document_signature else 0,
+        1 if folder.customer_name or folder.salesperson_name or drawing_codes else 0,
+        len(drawing_codes),
+        folder.document_scanned_at or datetime.datetime.min,
+    )
+
+
+def _prefer_folder_for_root(current: Folder | None, candidate: Folder, root: str) -> Folder:
+    if current is None:
+        return candidate
+
+    current_scoped = _is_scoped_project_path(root, current.absolute_path or "", current.name or "")
+    candidate_scoped = _is_scoped_project_path(root, candidate.absolute_path or "", candidate.name or "")
+    if candidate_scoped != current_scoped:
+        return candidate if candidate_scoped else current
+
+    current_exists = os.path.isdir(current.absolute_path or "")
+    candidate_exists = os.path.isdir(candidate.absolute_path or "")
+    if candidate_exists != current_exists:
+        return candidate if candidate_exists else current
+
+    current_metadata = _folder_metadata_score(current)
+    candidate_metadata = _folder_metadata_score(candidate)
+    if candidate_metadata != current_metadata:
+        return candidate if candidate_metadata > current_metadata else current
+
+    current_has_spec = bool(_folder_spec(current.name or ""))
+    candidate_has_spec = bool(_folder_spec(candidate.name or ""))
+    if candidate_has_spec != current_has_spec:
+        return candidate if candidate_has_spec else current
+
+    current_is_copy = _is_copy_folder_name(current.name or "")
+    candidate_is_copy = _is_copy_folder_name(candidate.name or "")
+    if candidate_is_copy != current_is_copy:
+        return current if candidate_is_copy else candidate
+
+    return candidate if _folder_freshness(candidate) > _folder_freshness(current) else current
+
+
+def _dedupe_project_folders(folders: list[Folder], root: str = "") -> list[Folder]:
+    by_code: dict[str, Folder] = {}
+    for folder in folders:
+        code = _project_code(folder.name or "")
+        if not code:
+            continue
+        by_code[code] = _prefer_folder_for_root(by_code.get(code), folder, root)
+
+    return sorted(by_code.values(), key=_folder_freshness, reverse=True)
 
 
 def _classify_plan_file(path: str, is_dir: bool = False) -> str:
@@ -206,7 +317,11 @@ def list_folders(
     db: Session = Depends(get_db),
 ):
     """GET /api/folders — List all folders (optionally filtered by status)."""
-    query = db.query(Folder).order_by(Folder.id.desc())
+    query = db.query(Folder).order_by(
+        desc(Folder.last_seen),
+        desc(Folder.updated_at),
+        desc(Folder.id),
+    )
     if status_filter:
         try:
             status = FolderStatus(status_filter)
@@ -225,9 +340,11 @@ def list_folders(
                 folder.name or "",
             )
         ]
+        scoped = _dedupe_project_folders(scoped, normalized_root)
         return scoped[skip : skip + limit]
 
-    return query.offset(skip).limit(limit).all()
+    folders = _dedupe_project_folders(query.all())
+    return folders[skip : skip + limit]
 
 
 @router.get("/{folder_id}/documents")
@@ -291,13 +408,11 @@ def get_folder_document_file(
     if not os.path.isfile(target):
         raise HTTPException(status_code=404, detail="File not found")
 
-    headers = {}
-    if download:
-        headers["Content-Disposition"] = f'attachment; filename="{os.path.basename(target)}"'
     return FileResponse(
         target,
         media_type=mimetypes.guess_type(target)[0] or "application/octet-stream",
-        headers=headers,
+        filename=os.path.basename(target),
+        content_disposition_type="attachment" if download else "inline",
     )
 
 
@@ -335,6 +450,7 @@ def update_folder(
         svc = FolderRenameService(db)
         try:
             updated = svc.rename_folder(folder_id, payload.name)
+            sync_folder_to_main_project(updated)
             return updated
         except RenameError as exc:
             raise HTTPException(
@@ -354,11 +470,13 @@ def update_folder(
         folder.updated_at = datetime.datetime.utcnow()
         db.commit()
         db.refresh(folder)
+        sync_folder_to_main_project(folder)
     elif payload.name is not None:
         folder.name = payload.name
         folder.updated_at = datetime.datetime.utcnow()
         db.commit()
         db.refresh(folder)
+        sync_folder_to_main_project(folder)
 
     return folder
 
@@ -379,7 +497,9 @@ def move_folder(
     """
     svc = FolderMoveService(db)
     try:
-        return svc.move_folder(folder_id, payload.new_relative_path, payload.new_name)
+        updated = svc.move_folder(folder_id, payload.new_relative_path, payload.new_name)
+        sync_folder_to_main_project(updated)
+        return updated
     except MoveError as exc:
         raise HTTPException(
             status_code=exc.status_code,

@@ -28,9 +28,12 @@ class Settings(BaseSettings):
     )
 
     DATABASE_URL: str = "sqlite:///./folders.db"
-    SMB_ROOT: str
+    SMB_ROOT: str = ""
     SMB_EXCLUDES: str = "sample_folder,test_folder,_deleted"
     SCAN_INTERVAL: int = 10
+    SCANNER_MAX_WORKERS: int = 2
+    SCANNER_RECONCILE_INTERVAL: int = 10
+    SCANNER_FULL_REPAIR_INTERVAL: int = 21600
     SERVER_HOST: str = "127.0.0.1"
     SERVER_PORT: int = 18001
     SMB_USERNAME: Optional[str] = None

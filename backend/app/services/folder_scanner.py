@@ -15,11 +15,17 @@ from sqlalchemy.orm import Session
 from app.config import normalize_smb_root, settings
 from app.models.folder import Folder, FolderStatus
 from app.models.folder_event import FolderEvent, FolderEventType
+from app.models.scan_snapshot import ScanSnapshot
+from app.services.project_sync import sync_folder_to_main_project
 from app.websocket.manager import ws_manager
 
 logger = logging.getLogger(__name__)
 PROJECT_FOLDER_PATTERN = re.compile(
     r"^[A-Z][A-Z0-9]{0,7}-\d{2}(0[1-9]|1[0-2])-\d{3}(?:$|[-_\s])",
+    re.IGNORECASE,
+)
+PROJECT_IDENTITY_PATTERN = re.compile(
+    r"^([A-Z][A-Z0-9]{0,7}-\d{2}(?:0[1-9]|1[0-2])-\d{3})(?:$|[-_\s])",
     re.IGNORECASE,
 )
 YEAR_FOLDER_PATTERN = re.compile(r"^\d{4}$")
@@ -80,6 +86,11 @@ def _is_project_folder(name: str) -> bool:
     return bool(PROJECT_FOLDER_PATTERN.match(name.strip()))
 
 
+def _project_identity(name: str) -> str:
+    match = PROJECT_IDENTITY_PATTERN.match((name or "").strip())
+    return match.group(1).upper() if match else ""
+
+
 def _is_year_folder(name: str) -> bool:
     return bool(YEAR_FOLDER_PATTERN.match(name.strip()))
 
@@ -105,12 +116,24 @@ def _is_scoped_project_path(root: str, full_path: str) -> bool:
 class FolderScanner:
     """Scans *SMB_ROOT* periodically and syncs state into the database."""
 
-    def __init__(self, db: Session, smb_root: Optional[str] = None, excludes: Optional[list] = None):
+    def __init__(
+        self,
+        db: Session,
+        smb_root: Optional[str] = None,
+        excludes: Optional[list] = None,
+        force_document_cache: bool = False,
+        force_full_scan: bool = False,
+    ):
         self.db = db
         self.smb_root = normalize_smb_root(smb_root or settings.SMB_ROOT)
         raw_excludes = excludes or _parse_excludes(settings.SMB_EXCLUDES)
         self.excludes = {e.strip() for e in raw_excludes if e.strip()}
+        self.force_document_cache = force_document_cache
+        self.force_full_scan = force_full_scan
         self._running = False
+        self._scanned_project_parents: set[str] = set()
+        self._snapshot_map: dict[str, ScanSnapshot] = {}
+        self._scan_stats = {"scanned_containers": 0, "skipped_containers": 0}
 
     # ---- public API ----
 
@@ -123,27 +146,40 @@ class FolderScanner:
             "renamed": 0,
             "modified": 0,
             "document_cache_updated": 0,
+            "project_sync_updated": 0,
+            "project_sync_skipped": 0,
+            "full_scan": self.force_full_scan,
+            "scanned_containers": 0,
+            "skipped_containers": 0,
             "errors": [],
         }
 
         try:
             fs_folders = self._read_filesystem()
+            summary.update(self._scan_stats)
         except Exception as exc:
             logger.exception("Filesystem read error")
             summary["errors"].append(str(exc))
             return summary
 
-        db_map = self._load_db_map()
+        db_map = self._load_db_map(fs_folders)
 
         try:
-            # 1. Detect deletions and renames (db entries not in filesystem)
+            # 1. Detect deletions and renames in containers scanned this round.
             for db_path, db_folder in list(db_map.items()):
                 if db_folder.status == FolderStatus.DELETED:
                     continue
-                if db_path not in fs_folders:
+                if db_path not in fs_folders and self._should_reconcile_db_path(db_path):
                     candidate = self._find_rename_target(db_folder, fs_folders)
-                    if candidate:
+                    if candidate and (
+                        candidate[0] not in db_map
+                        or getattr(db_map.get(candidate[0]), "id", None) == db_folder.id
+                    ):
                         self._handle_rename(db_folder, candidate, summary)
+                        db_map.pop(db_path, None)
+                        db_map[candidate[0]] = db_folder
+                        self._refresh_document_cache(db_folder, candidate[1], summary)
+                        self._sync_main_project(db_folder, summary)
                     else:
                         self._handle_delete(db_folder, summary)
 
@@ -152,10 +188,12 @@ class FolderScanner:
                 if fs_path not in db_map:
                     folder = self._handle_create(fs_path, fs_info, summary)
                     self._refresh_document_cache(folder, fs_info, summary)
+                    self._sync_main_project(folder, summary)
                 else:
                     db_folder = db_map[fs_path]
                     self._handle_maybe_modify(db_folder, fs_info, summary)
                     self._refresh_document_cache(db_folder, fs_info, summary)
+                    self._sync_main_project(db_folder, summary)
 
             self.db.commit()
         except Exception as exc:
@@ -186,6 +224,12 @@ class FolderScanner:
     def stop(self):
         self._running = False
 
+    def _should_reconcile_db_path(self, db_path: str) -> bool:
+        if self.force_full_scan:
+            return True
+        parent = _normalize_path(os.path.dirname(db_path))
+        return parent in self._scanned_project_parents
+
     # ---- filesystem I/O ----
 
     def _read_filesystem(self) -> Dict[str, dict]:
@@ -197,6 +241,9 @@ class FolderScanner:
         """
         result: Dict[str, dict] = {}
         root = self.smb_root
+        self._scanned_project_parents = set()
+        self._snapshot_map = self._load_snapshot_map()
+        self._scan_stats = {"scanned_containers": 0, "skipped_containers": 0}
 
         def add_project_entry(entry) -> None:
             try:
@@ -214,6 +261,50 @@ class FolderScanner:
                 "is_dir": True,
             }
 
+        def container_relative_path(path: str) -> str:
+            if _compare_root(path) == _compare_root(root):
+                return ""
+            return _relative_path(root, path)
+
+        def container_signature(entries: list) -> str:
+            parts: list[str] = []
+            for entry in entries:
+                if entry.name in self.excludes:
+                    continue
+                try:
+                    stat = entry.stat()
+                except OSError:
+                    continue
+                if (
+                    _is_project_folder(entry.name)
+                    or _is_year_folder(entry.name)
+                    or _is_month_folder(entry.name)
+                ):
+                    parts.append(f"{entry.name}:{stat.st_mtime_ns}:{stat.st_size}")
+            return "|".join(sorted(parts))
+
+        def snapshot_matches(rel_path: str, signature: str) -> bool:
+            snapshot = self._snapshot_map.get(rel_path)
+            return bool(snapshot and snapshot.signature == signature)
+
+        def upsert_snapshot(rel_path: str, signature: str) -> None:
+            now = datetime.datetime.utcnow()
+            snapshot = self._snapshot_map.get(rel_path)
+            if snapshot:
+                snapshot.signature = signature
+                snapshot.last_scanned_at = now
+                snapshot.updated_at = now
+                return
+
+            snapshot = ScanSnapshot(
+                scan_root=_normalize_path(root),
+                relative_path=rel_path,
+                signature=signature,
+                last_scanned_at=now,
+            )
+            self.db.add(snapshot)
+            self._snapshot_map[rel_path] = snapshot
+
         def should_enter_container(name: str, depth: int) -> bool:
             if depth >= MAX_PROJECT_SEARCH_DEPTH - 1:
                 return False
@@ -226,20 +317,47 @@ class FolderScanner:
         def scan_container(path: str, depth: int) -> None:
             try:
                 with os.scandir(path) as entries:
-                    for entry in entries:
-                        if not entry.is_dir():
-                            continue
+                    dir_entries = [entry for entry in entries if entry.is_dir()]
+                    rel_path = container_relative_path(path)
+                    signature = container_signature(dir_entries)
+                    enterable_entries = [
+                        entry
+                        for entry in dir_entries
+                        if entry.name not in self.excludes
+                        and should_enter_container(entry.name, depth)
+                    ]
+                    container_unchanged = (
+                        not self.force_full_scan
+                        and rel_path
+                        and snapshot_matches(rel_path, signature)
+                    )
+                    if container_unchanged and not enterable_entries:
+                        self._scan_stats["skipped_containers"] += 1
+                        logger.info("Skipping unchanged scan container: %s", path)
+                        return
+
+                    if container_unchanged:
+                        self._scan_stats["skipped_containers"] += 1
+                    else:
+                        upsert_snapshot(rel_path, signature)
+                        self._scanned_project_parents.add(rel_path)
+                        self._scan_stats["scanned_containers"] += 1
+
+                    for entry in dir_entries:
                         if entry.name in self.excludes:
                             logger.info("Skipping excluded folder: %s", entry.path)
                             continue
                         if _is_project_folder(entry.name):
-                            add_project_entry(entry)
+                            if not container_unchanged:
+                                add_project_entry(entry)
                             continue
                         if should_enter_container(entry.name, depth):
                             scan_container(entry.path, depth + 1)
                         else:
                             logger.info("Skipping non-project folder: %s", entry.path)
             except OSError as exc:
+                if depth == 0:
+                    raise
                 logger.warning("Cannot scan folder %s: %s", path, exc)
 
         try:
@@ -250,13 +368,27 @@ class FolderScanner:
 
         return result
 
+    def _load_snapshot_map(self) -> dict[str, ScanSnapshot]:
+        root_key = _normalize_path(self.smb_root)
+        rows = (
+            self.db.query(ScanSnapshot)
+            .filter(ScanSnapshot.scan_root == root_key)
+            .all()
+        )
+        return {row.relative_path or "": row for row in rows}
+
     # ---- database helpers ----
 
-    def _load_db_map(self) -> Dict[str, Folder]:
-        """Return {relative_path: Folder} for folders inside the active scan root."""
+    def _load_db_map(self, fs_folders: Dict[str, dict]) -> Dict[str, Folder]:
+        """Return {relative_path: Folder} for folders matching this scan.
+
+        Each configured SMB root is an independent scope. Different users can
+        have the same relative layout under different root folders.
+        """
+        root_prefix = f"{_normalize_path(self.smb_root).rstrip('/')}/%"
         folders = (
             self.db.query(Folder)
-            .filter(Folder.absolute_path.like(f"{_normalize_path(self.smb_root).rstrip('/')}/%"))
+            .filter(Folder.absolute_path.like(root_prefix))
             .all()
         )
         folders = [
@@ -268,8 +400,6 @@ class FolderScanner:
         for folder in folders:
             if folder.absolute_path:
                 mapped[_relative_path(self.smb_root, folder.absolute_path)] = folder
-            elif folder.relative_path:
-                mapped[folder.relative_path] = folder
         return mapped
 
     # ---- change handlers ----
@@ -283,12 +413,22 @@ class FolderScanner:
         treat it as a rename.
         """
         db_parent = os.path.dirname(db_folder.relative_path)
+        db_identity = _project_identity(db_folder.name)
 
         candidates = []
         for fs_rel, fs_info in fs_folders.items():
             if os.path.dirname(fs_rel) != db_parent:
                 continue
             candidates.append((fs_rel, fs_info))
+
+        if db_identity:
+            identity_matches = [
+                candidate
+                for candidate in candidates
+                if _project_identity(candidate[1].get("name", "")) == db_identity
+            ]
+            if len(identity_matches) == 1:
+                return identity_matches[0]
 
         if len(candidates) == 1:
             return candidates[0]
@@ -302,6 +442,7 @@ class FolderScanner:
             name=info["name"],
             relative_path=rel_path,
             absolute_path=info["absolute_path"],
+            scan_root=_normalize_path(self.smb_root),
             parent_id=self._resolve_parent(rel_path),
             status=FolderStatus.ACTIVE,
             first_seen=datetime.datetime.utcnow(),
@@ -348,6 +489,7 @@ class FolderScanner:
         folder.name = target_info["name"]
         folder.relative_path = target_rel
         folder.absolute_path = target_info["absolute_path"]
+        folder.scan_root = _normalize_path(self.smb_root)
         folder.parent_id = self._resolve_parent(target_rel)
         folder.updated_at = datetime.datetime.utcnow()
 
@@ -373,6 +515,7 @@ class FolderScanner:
             folder.name = info["name"]
             folder.relative_path = info["relative_path"]
             folder.absolute_path = info["absolute_path"]
+            folder.scan_root = _normalize_path(self.smb_root)
             folder.parent_id = self._resolve_parent(info["relative_path"])
             folder.updated_at = datetime.datetime.utcnow()
             self.db.add(folder)
@@ -399,6 +542,10 @@ class FolderScanner:
             folder.absolute_path = info["absolute_path"]
             changed = True
 
+        if getattr(folder, "scan_root", None) != _normalize_path(self.smb_root):
+            folder.scan_root = _normalize_path(self.smb_root)
+            changed = True
+
         if changed:
             folder.updated_at = datetime.datetime.utcnow()
             self._log_event(
@@ -418,7 +565,11 @@ class FolderScanner:
         try:
             from app.services.document_scanner import DocumentScanner
 
-            if DocumentScanner(self.smb_root).update_folder_cache(folder, info.get("mtime")):
+            if DocumentScanner(self.smb_root).update_folder_cache(
+                folder,
+                info.get("mtime"),
+                force=self.force_document_cache,
+            ):
                 summary["document_cache_updated"] += 1
         except Exception as exc:
             logger.warning(
@@ -426,6 +577,17 @@ class FolderScanner:
                 getattr(folder, "relative_path", ""),
                 exc,
             )
+
+    @staticmethod
+    def _sync_main_project(folder: Folder, summary: Dict) -> None:
+        result = sync_folder_to_main_project(folder)
+        if result.get("success") and result.get("updated"):
+            summary["project_sync_updated"] += 1
+            return
+
+        summary["project_sync_skipped"] += 1
+        if result.get("reason") == "sync_error":
+            summary["errors"].append(result.get("error") or "Project sync failed")
 
     def _resolve_parent(self, rel_path: str) -> Optional[int]:
         """Return the DB id of the parent folder, if it exists."""

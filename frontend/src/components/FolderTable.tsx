@@ -11,17 +11,32 @@ import {
   fetchMaterialFolder,
   fetchPlanFolderDocuments,
   fetchFolders,
+  fetchUserSmbRoot,
+  saveUserSmbRoot,
   triggerScan,
 } from '../services/api';
+import {
+  SMART_TABLE_COMPACT_HEADER_HEIGHT,
+  SMART_TABLE_COMPACT_ROW_HEIGHT,
+  SMART_TABLE_DEFAULT_HEADER_HEIGHT,
+  SMART_TABLE_DEFAULT_ROW_HEIGHT,
+  SmartTableDensity,
+  applySmartTableColumnState,
+  applySmartTableFilterModel,
+  getSmartTableColumnState,
+  getSmartTableDisplayedFields,
+  getSmartTableFilterModel,
+  loadSmartTableLayout,
+  normalizeSmartTableText,
+  resetSmartTableColumns,
+  saveSmartTableLayout,
+  setSmartTableColumnVisible,
+} from '../table/smartTable';
 import { wsClient } from '../services/websocket';
 import FolderEditor from './FolderEditor';
 import './FolderTable.css';
 
-declare global {
-  interface Window {
-    XLSX?: any;
-  }
-}
+const SCANNER_SMART_TABLE_ID = 'scanner-personal-projects';
 
 const statusOptions = [
   { value: 'active', label: 'Active' },
@@ -45,7 +60,63 @@ const scannerTranslations = {
     smbPath: 'Đường dẫn SMB',
     status: 'Trạng thái',
     updated: 'Cập nhật',
+    statusActive: 'Đang dùng',
+    statusDeleted: 'Đã xóa',
+    statusPending: 'Chờ xử lý',
     cannotConnect: 'Không thể kết nối máy chủ.',
+    scanSettings: 'Cài đặt quét',
+    save: 'Lưu',
+    scan: 'Quét',
+    closeSettings: 'Đóng cài đặt',
+    smbPlaceholder: '\\\\server\\share hoặc D:\\du-an',
+    searchPlaceholder: 'Tìm kiếm mã phương án, quy cách, khách hàng, mã bản vẽ...',
+    clearSearch: 'Xóa tìm kiếm',
+    invalidRoot: 'Đường dẫn phải có dạng D:\\... hoặc \\\\server\\share\\...',
+    emptyNoLink: 'Chưa có SMB link nên bảng đang để trống.',
+    savedRoot: 'Đã lưu SMB link cho tài khoản này.',
+    clearedRoot: 'Đã xóa SMB link, bảng đã để trống.',
+    noRootNoScan: 'Chưa có SMB link nên không quét. Bảng đã để trống.',
+    copyCell: 'Đã copy ô đang chọn.',
+    copyEmptyCell: 'Ô đang chọn không có dữ liệu.',
+    copyRow: 'Đã copy dòng đang chọn.',
+    scanFailed: 'Không thể quét SMB link',
+    scanSummary: (scan: any) =>
+      `Đã quét: mới ${scan.created || 0}, xóa ${scan.deleted || 0}, đổi tên ${scan.renamed || 0}, sửa ${scan.modified || 0}, cập nhật mã BV ${scan.document_cache_updated || 0}.`,
+    editTitle: 'Sửa',
+    materialTitle: 'Tài liệu mã phương án',
+    loadingDocuments: 'Đang tải tài liệu...',
+    foundDocuments: (count: number) => `Tìm thấy ${count} tài liệu`,
+    materialSummary: (files: number, folders: number) => `Tìm thấy ${files} file và ${folders} thư mục trong SMB`,
+    parentCode: 'Mã mẹ',
+    smbFolders: 'Thư mục SMB',
+    fileSection: 'File',
+    folderFallback: 'Thư mục',
+    fileCount: (count: number) => `${count} file`,
+    openingFolder: 'Đang mở thư mục...',
+    open: 'Mở',
+    close: 'Đóng',
+    download: 'Tải',
+    folderType: 'Thư mục',
+    drawingType: 'Bản vẽ',
+    fileType: 'File',
+    loadingExcel: 'Đang tải file Excel...',
+    sheetEmpty: 'Sheet trống',
+    excelLoadLibraryError: 'Chưa tải được SheetJS để đọc Excel',
+    excelReadError: 'Không thể đọc file Excel',
+    excelNoSheetError: 'File Excel không có sheet',
+    excelError: 'Lỗi đọc file Excel',
+    openSmbFolderError: 'Không thể mở thư mục SMB',
+    documentsNotFoundError: 'Không tìm thấy tài liệu SMB',
+    missingFileNote: 'server không truy cập được file',
+    noDocuments: 'Không tìm thấy tài liệu',
+    allStatus: 'Tất cả trạng thái',
+    columns: 'Cột',
+    resetLayout: 'Reset bảng',
+    compact: 'Gọn',
+    comfortable: 'Rộng',
+    visibleColumns: 'Cột hiển thị',
+    quickFilters: (count: number) => `${count} bộ lọc`,
+    rowsShown: (shown: number, total: number) => `${shown}/${total} dòng`,
   },
   zh: {
     id: 'ID',
@@ -60,7 +131,63 @@ const scannerTranslations = {
     smbPath: 'SMB路径',
     status: '状态',
     updated: '更新时间',
+    statusActive: '有效',
+    statusDeleted: '已删除',
+    statusPending: '待处理',
     cannotConnect: '无法连接服务器。',
+    scanSettings: '扫描设置',
+    save: '保存',
+    scan: '扫描',
+    closeSettings: '关闭设置',
+    smbPlaceholder: '\\\\server\\share 或 D:\\项目',
+    searchPlaceholder: '搜索方案编号、规格、客户、图纸编号...',
+    clearSearch: '清除搜索',
+    invalidRoot: '路径格式必须为 D:\\... 或 \\\\server\\share\\...',
+    emptyNoLink: '尚未设置SMB链接，表格为空。',
+    savedRoot: '已为当前账号保存SMB链接。',
+    clearedRoot: '已删除SMB链接，表格已清空。',
+    noRootNoScan: '尚未设置SMB链接，未执行扫描。表格已清空。',
+    copyCell: '已复制当前单元格。',
+    copyEmptyCell: '当前单元格没有数据。',
+    copyRow: '已复制当前行。',
+    scanFailed: '无法扫描SMB链接',
+    scanSummary: (scan: any) =>
+      `扫描完成：新增 ${scan.created || 0}，删除 ${scan.deleted || 0}，重命名 ${scan.renamed || 0}，修改 ${scan.modified || 0}，更新图纸编号 ${scan.document_cache_updated || 0}。`,
+    editTitle: '编辑',
+    materialTitle: '方案资料',
+    loadingDocuments: '正在加载资料...',
+    foundDocuments: (count: number) => `找到 ${count} 个资料`,
+    materialSummary: (files: number, folders: number) => `在SMB中找到 ${files} 个文件和 ${folders} 个文件夹`,
+    parentCode: '母码',
+    smbFolders: 'SMB文件夹',
+    fileSection: '文件',
+    folderFallback: '文件夹',
+    fileCount: (count: number) => `${count} 个文件`,
+    openingFolder: '正在打开文件夹...',
+    open: '打开',
+    close: '关闭',
+    download: '下载',
+    folderType: '文件夹',
+    drawingType: '图纸',
+    fileType: '文件',
+    loadingExcel: '正在加载Excel文件...',
+    sheetEmpty: 'Sheet为空',
+    excelLoadLibraryError: '无法加载SheetJS读取Excel',
+    excelReadError: '无法读取Excel文件',
+    excelNoSheetError: 'Excel文件没有工作表',
+    excelError: '读取Excel出错',
+    openSmbFolderError: '无法打开SMB文件夹',
+    documentsNotFoundError: '未找到SMB资料',
+    missingFileNote: '服务器无法访问此文件',
+    noDocuments: '未找到资料',
+    allStatus: '全部状态',
+    columns: '列',
+    resetLayout: '重置表格',
+    compact: '紧凑',
+    comfortable: '舒适',
+    visibleColumns: '显示列',
+    quickFilters: (count: number) => `${count} 个筛选`,
+    rowsShown: (shown: number, total: number) => `${shown}/${total} 行`,
   },
 };
 
@@ -81,12 +208,23 @@ const productTypes = [
 ];
 
 const normalizeForMatch = (value: string): string =>
-  value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  normalizeSmartTableText(value);
 
 const PROJECT_FOLDER_REGEX = /^([A-Z][A-Z0-9]{0,7}-(\d{2})(0[1-9]|1[0-2])-\d{3}(?:-[A-Z]\d+)?)(?:$|[-_\s])/i;
+const COPY_SUFFIX_REGEX = /(?:[-_\s]*(?:副本|复件|复制|copy|copie|duplicate)(?:\s*\(\d+\))?)+$/i;
 
 const matchProjectFolderName = (name: string): RegExpMatchArray | null =>
   name.trim().match(PROJECT_FOLDER_REGEX);
+
+const stripCopySuffix = (value: string): string => {
+  let cleaned = value.trim();
+  let previous = '';
+  while (cleaned && cleaned !== previous) {
+    previous = cleaned;
+    cleaned = cleaned.replace(COPY_SUFFIX_REGEX, '').replace(/[-_\s]+$/g, '').trim();
+  }
+  return cleaned;
+};
 
 const getScannerLanguage = (): ScannerLanguage => {
   const queryLanguage = new URLSearchParams(window.location.search).get('lang');
@@ -135,16 +273,6 @@ type FolderTableProps = {
   onFoldersChange?: (count: number) => void;
 };
 
-type ExcelViewerState = {
-  fileName: string;
-  workbook: any | null;
-  sheetNames: string[];
-  activeSheet: string;
-  rows: string[][];
-  loading: boolean;
-  error: string | null;
-};
-
 const FolderTable: React.FC<FolderTableProps> = ({
   refreshTrigger = 0,
   onFoldersChange,
@@ -157,25 +285,55 @@ const FolderTable: React.FC<FolderTableProps> = ({
   const [editingMode, setEditingMode] = useState<'rename' | 'move'>('rename');
   const [selectedFolder, setSelectedFolder] = useState<FolderRead | null>(null);
   const [language, setLanguage] = useState<ScannerLanguage>(() => getScannerLanguage());
+  const [scannerUserKey] = useState(() => getScannerUserKey());
+  const [initialTableLayout] = useState(() =>
+    loadSmartTableLayout(SCANNER_SMART_TABLE_ID, getScannerUserKey()),
+  );
   const [smbRoot, setSmbRoot] = useState(() => getStoredSmbRoot());
   const [smbDraft, setSmbDraft] = useState(() => getStoredSmbRoot());
   const [smbBusy, setSmbBusy] = useState(false);
   const [smbMessage, setSmbMessage] = useState<string | null>(null);
+  const [smartSearch, setSmartSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
+  const [columnPanelOpen, setColumnPanelOpen] = useState(false);
+  const [columnUiVersion, setColumnUiVersion] = useState(0);
+  const [density, setDensity] = useState<SmartTableDensity>(
+    initialTableLayout.density || 'comfortable',
+  );
+  const [rowHeight, setRowHeight] = useState(
+    Number(initialTableLayout.rowHeight) || SMART_TABLE_DEFAULT_ROW_HEIGHT,
+  );
+  const [headerHeight, setHeaderHeight] = useState(
+    Number(initialTableLayout.headerHeight) || SMART_TABLE_DEFAULT_HEADER_HEIGHT,
+  );
   const [materialCode, setMaterialCode] = useState('');
   const [materialDocs, setMaterialDocs] = useState<MaterialDocumentsResponse | null>(null);
   const [materialFolder, setMaterialFolder] = useState<MaterialFolderResponse | null>(null);
   const [materialFolderLoading, setMaterialFolderLoading] = useState(false);
   const [materialLoading, setMaterialLoading] = useState(false);
   const [materialError, setMaterialError] = useState<string | null>(null);
-  const [excelViewer, setExcelViewer] = useState<ExcelViewerState | null>(null);
   const rowDataRef = useRef<FolderRead[]>([]);
 
   const labels = scannerTranslations[language];
 
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type === 'scanner:openSettings') {
+        setSettingsPanelOpen(true);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
   const extractQuyCach = (name: string): string => {
     const match = matchProjectFolderName(name);
     if (!match) return '';
-    return name.trim().slice(match[1].length).replace(/^[-_\s]+/, '').trim();
+    const spec = name.trim().slice(match[1].length).replace(/^[-_\s]+/, '').trim();
+    return stripCopySuffix(spec);
   };
 
   const extractPlanMonth = (name: string): string => {
@@ -240,12 +398,116 @@ const FolderTable: React.FC<FolderTableProps> = ({
     });
   };
 
+  const getFolderCellValue = useCallback((folder: FolderRead | undefined, field?: string): string => {
+    if (!folder || !field) return '';
+    switch (field) {
+      case 'id':
+        return String(folder.id ?? '');
+      case 'plan_month':
+        return extractPlanMonth(folder.name || '');
+      case 'name':
+        return matchProjectFolderName(folder.name || '')?.[1] || folder.name || '';
+      case 'quy_cach':
+        return extractQuyCach(folder.name || '');
+      case 'product_type':
+        return detectProductType(folder);
+      case 'relative_path':
+        return folder.relative_path || '';
+      case 'absolute_path':
+        return folder.absolute_path || '';
+      case 'status':
+        return folder.status || '';
+      case 'updated_at':
+        if (!folder.updated_at) return '';
+        {
+          const parsed = new Date(folder.updated_at);
+          return Number.isNaN(parsed.getTime())
+            ? folder.updated_at
+            : parsed.toLocaleString(language === 'zh' ? 'zh-CN' : 'vi-VN');
+        }
+      case 'customer_name':
+        return folder.customer_name || '';
+      case 'salesperson_name':
+        return folder.salesperson_name || '';
+      case 'drawing_codes':
+        return (folder.drawing_codes || []).join(', ');
+      default:
+        return String((folder as any)[field] ?? '');
+    }
+  }, [language]);
+
+  const getFolderRowClipboardText = useCallback((folder: FolderRead): string => {
+    const fields = getSmartTableDisplayedFields(gridApi);
+    return fields.map((field) => getFolderCellValue(folder, field)).join('\t');
+  }, [getFolderCellValue, gridApi]);
+
+  const getFolderSearchText = useCallback((folder: FolderRead): string => {
+    const fields = [
+      'id',
+      'plan_month',
+      'name',
+      'quy_cach',
+      'product_type',
+      'customer_name',
+      'salesperson_name',
+      'drawing_codes',
+      'relative_path',
+      'absolute_path',
+      'status',
+    ];
+    return fields.map((field) => getFolderCellValue(folder, field)).join(' ');
+  }, [getFolderCellValue]);
+
+  const writeClipboardText = useCallback(async (text: string) => {
+    if (!text) return;
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  }, []);
+
+  const copyFocusedFolderData = useCallback(async () => {
+    const focusedCell = gridApi?.getFocusedCell();
+    if (focusedCell) {
+      const rowNode = gridApi?.getDisplayedRowAtIndex(focusedCell.rowIndex);
+      const folder = rowNode?.data as FolderRead | undefined;
+      const field = focusedCell.column.getColDef().field;
+      const value = getFolderCellValue(folder, field);
+      await writeClipboardText(value);
+      setSmbMessage(value ? labels.copyCell : labels.copyEmptyCell);
+      return;
+    }
+
+    if (selectedFolder) {
+      await writeClipboardText(getFolderRowClipboardText(selectedFolder));
+      setSmbMessage(labels.copyRow);
+    }
+  }, [getFolderCellValue, getFolderRowClipboardText, gridApi, labels, selectedFolder, writeClipboardText]);
+
+  const getFolderFreshnessTime = (folder?: FolderRead): number => {
+    const value = folder?.last_seen || folder?.updated_at || folder?.created_at || '';
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+
   const columnDefs = useMemo<ColDef[]>(() => [
     {
       field: 'id',
       headerName: labels.id,
       width: 70,
       sortable: true,
+      comparator: (_a: number, _b: number, nodeA: any, nodeB: any) =>
+        getFolderFreshnessTime(nodeA?.data) - getFolderFreshnessTime(nodeB?.data),
       filter: false,
     },
     {
@@ -302,7 +564,13 @@ const FolderTable: React.FC<FolderTableProps> = ({
       width: 130,
       cellRenderer: (params: any) => {
         const status = params.value as string;
-        const label = statusOptions.find((s) => s.value === status)?.label || status;
+        const label = status === 'active'
+          ? labels.statusActive
+          : status === 'deleted'
+            ? labels.statusDeleted
+            : status === 'pending'
+              ? labels.statusPending
+              : statusOptions.find((s) => s.value === status)?.label || status;
         return `<span class="status-badge status-${status}">${label}</span>`;
       },
       sortable: true,
@@ -345,8 +613,48 @@ const FolderTable: React.FC<FolderTableProps> = ({
     },
   ], [language, labels]);
 
+  const persistSmartTableLayout = useCallback((apiOverride?: GridApi | null) => {
+    const activeApi = apiOverride || gridApi;
+    saveSmartTableLayout(SCANNER_SMART_TABLE_ID, scannerUserKey, {
+      columnState: getSmartTableColumnState(activeApi),
+      filterModel: getSmartTableFilterModel(activeApi),
+      rowHeight,
+      headerHeight,
+      density,
+    });
+    setColumnUiVersion((version) => version + 1);
+  }, [density, gridApi, headerHeight, rowHeight, scannerUserKey]);
+
+  const restoreSmartTableLayout = useCallback((api: GridApi) => {
+    applySmartTableColumnState(api, initialTableLayout.columnState);
+    applySmartTableFilterModel(api, initialTableLayout.filterModel);
+    setColumnUiVersion((version) => version + 1);
+  }, [initialTableLayout]);
+
   const onGridReady = useCallback((params: GridReadyEvent) => {
     setGridApi(params.api);
+    restoreSmartTableLayout(params.api);
+  }, [restoreSmartTableLayout]);
+
+  const handleResetSmartTableLayout = useCallback(() => {
+    resetSmartTableColumns(gridApi);
+    setSmartSearch('');
+    setStatusFilter('');
+    setDensity('comfortable');
+    setRowHeight(SMART_TABLE_DEFAULT_ROW_HEIGHT);
+    setHeaderHeight(SMART_TABLE_DEFAULT_HEADER_HEIGHT);
+    saveSmartTableLayout(SCANNER_SMART_TABLE_ID, scannerUserKey, {
+      rowHeight: SMART_TABLE_DEFAULT_ROW_HEIGHT,
+      headerHeight: SMART_TABLE_DEFAULT_HEADER_HEIGHT,
+      density: 'comfortable',
+    });
+    setColumnUiVersion((version) => version + 1);
+  }, [gridApi, scannerUserKey]);
+
+  const handleDensityChange = useCallback((nextDensity: SmartTableDensity) => {
+    setDensity(nextDensity);
+    setRowHeight(nextDensity === 'compact' ? SMART_TABLE_COMPACT_ROW_HEIGHT : SMART_TABLE_DEFAULT_ROW_HEIGHT);
+    setHeaderHeight(nextDensity === 'compact' ? SMART_TABLE_COMPACT_HEADER_HEIGHT : SMART_TABLE_DEFAULT_HEADER_HEIGHT);
   }, []);
 
   const onCellValueChanged = useCallback((params: any) => {
@@ -463,6 +771,27 @@ const FolderTable: React.FC<FolderTableProps> = ({
   });
 
   useEffect(() => {
+    let cancelled = false;
+    fetchUserSmbRoot(scannerUserKey)
+      .then((res) => {
+        if (cancelled) return;
+        const savedRoot = res.data?.smb_root?.trim() || '';
+        if (!savedRoot) return;
+        window.localStorage.setItem(getSmbRootStorageKey(), savedRoot);
+        setSmbDraft(savedRoot);
+        setSmbRoot(savedRoot);
+        loadDataRef.current(savedRoot);
+      })
+      .catch((err) => {
+        console.error(err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [scannerUserKey]);
+
+  useEffect(() => {
     const syncLanguage = () => setLanguage(getScannerLanguage());
     window.addEventListener('storage', syncLanguage);
     window.addEventListener('focus', syncLanguage);
@@ -505,6 +834,32 @@ const FolderTable: React.FC<FolderTableProps> = ({
     }
   }, [gridApi, loading]);
 
+  useEffect(() => {
+    const anyApi = gridApi as any;
+    if (typeof anyApi?.resetRowHeights === 'function') {
+      anyApi.resetRowHeights();
+    }
+    if (gridApi) {
+      persistSmartTableLayout(gridApi);
+    }
+  }, [density, gridApi, headerHeight, persistSmartTableLayout, rowHeight]);
+
+  useEffect(() => {
+    const handleCopyShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'c') return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+      if (!target?.closest('.folder-table-container')) return;
+      if (!gridApi) return;
+
+      event.preventDefault();
+      copyFocusedFolderData();
+    };
+
+    document.addEventListener('keydown', handleCopyShortcut);
+    return () => document.removeEventListener('keydown', handleCopyShortcut);
+  }, [copyFocusedFolderData, gridApi]);
+
   const handleFolderUpdated = (updated: FolderRead) => {
     setRowData((prev) =>
       prev.map((f) => (f.id === updated.id ? updated : f)),
@@ -524,8 +879,8 @@ const FolderTable: React.FC<FolderTableProps> = ({
       setError(null);
       setSmbMessage(
         value.trim()
-          ? 'Duong dan phai co dang D:\\... hoac \\\\server\\share\\...'
-          : 'Chua co SMB link nen bang dang de trong.',
+          ? labels.invalidRoot
+          : labels.emptyNoLink,
       );
     } else {
       setSmbMessage(null);
@@ -541,7 +896,7 @@ const FolderTable: React.FC<FolderTableProps> = ({
         if (nextRoot) {
           setSmbRoot('');
           clearStoredRows(setRowData, rowDataRef, onFoldersChange);
-          setSmbMessage('Duong dan phai co dang D:\\... hoac \\\\server\\share\\...');
+          setSmbMessage(labels.invalidRoot);
           return;
         }
       }
@@ -550,9 +905,10 @@ const FolderTable: React.FC<FolderTableProps> = ({
       } else {
         window.localStorage.removeItem(getSmbRootStorageKey());
       }
+      await saveUserSmbRoot(scannerUserKey, nextRoot);
       setSmbRoot(nextRoot);
       await loadData(nextRoot);
-      setSmbMessage(nextRoot ? 'Da luu SMB link cho tai khoan nay.' : 'Da xoa SMB link, bang da de trong.');
+      setSmbMessage(nextRoot ? labels.savedRoot : labels.clearedRoot);
     } finally {
       setSmbBusy(false);
     }
@@ -563,36 +919,35 @@ const FolderTable: React.FC<FolderTableProps> = ({
     setSmbBusy(true);
     setSmbMessage(null);
     try {
-      if (nextRoot) {
-        window.localStorage.setItem(getSmbRootStorageKey(), nextRoot);
-      } else {
-        window.localStorage.removeItem(getSmbRootStorageKey());
-      }
-      setSmbRoot(nextRoot);
       if (!nextRoot) {
+        window.localStorage.removeItem(getSmbRootStorageKey());
+        await saveUserSmbRoot(scannerUserKey, '');
+        setSmbRoot('');
         await loadData('');
-        setSmbMessage('Chua co SMB link nen khong quet. Bang da de trong.');
+        setSmbMessage(labels.noRootNoScan);
         return;
       }
       if (!isValidScanRoot(nextRoot)) {
+        setSmbRoot('');
         clearStoredRows(setRowData, rowDataRef, onFoldersChange);
-        setSmbMessage('Duong dan phai co dang D:\\... hoac \\\\server\\share\\...');
+        setSmbMessage(labels.invalidRoot);
         return;
       }
 
-      const result = await triggerScan(nextRoot);
+      window.localStorage.setItem(getSmbRootStorageKey(), nextRoot);
+      await saveUserSmbRoot(scannerUserKey, nextRoot);
+      setSmbRoot(nextRoot);
+      const result = await triggerScan(nextRoot, true, scannerUserKey);
       const errors = result.data.results?.errors || [];
       if (errors.length) {
         setSmbMessage(String(errors[0]));
       } else {
         await loadData(nextRoot);
         const scan = result.data.results || {};
-        setSmbMessage(
-          `Da quet: moi ${scan.created || 0}, xoa ${scan.deleted || 0}, doi ten ${scan.renamed || 0}, sua ${scan.modified || 0}.`,
-        );
+        setSmbMessage(labels.scanSummary(scan));
       }
     } catch (err: any) {
-      setSmbMessage(getApiErrorMessage(err, 'Khong the quet SMB link'));
+      setSmbMessage(getApiErrorMessage(err, labels.scanFailed));
     } finally {
       setSmbBusy(false);
     }
@@ -615,12 +970,12 @@ const FolderTable: React.FC<FolderTableProps> = ({
   };
 
   const getMaterialTypeLabel = (type?: string, isDir = false): string => {
-    if (isDir) return 'Folder';
+    if (isDir) return labels.folderType;
     if (type === 'pdf') return 'PDF';
     if (type === 'bom') return 'BOM';
     if (type === 'cad') return 'CAD';
-    if (type === 'drawing') return 'Drawing';
-    return 'File';
+    if (type === 'drawing') return labels.drawingType;
+    return labels.fileType;
   };
 
   const formatFileSize = (value?: number): string => {
@@ -646,69 +1001,15 @@ const FolderTable: React.FC<FolderTableProps> = ({
     return err?.message || fallback;
   };
 
-  const getSheetRows = (workbook: any, sheetName: string): string[][] => {
-    const worksheet = workbook?.Sheets?.[sheetName];
-    if (!worksheet || !window.XLSX?.utils?.sheet_to_json) return [];
-    const rows = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as any[][];
-    return rows
-      .slice(0, 300)
-      .map((row) => row.slice(0, 60).map((cell) => (cell == null ? '' : String(cell))));
-  };
-
-  const openExcelViewer = async (fileName: string, viewUrl: string) => {
+  const openExcelPreviewTab = (fileName: string, viewUrl: string, downloadUrl = '') => {
     if (!viewUrl) return;
-    setExcelViewer({
-      fileName,
-      workbook: null,
-      sheetNames: [],
-      activeSheet: '',
-      rows: [],
-      loading: true,
-      error: null,
-    });
-
-    try {
-      if (!window.XLSX) {
-        throw new Error('Chua tai duoc SheetJS de doc Excel');
-      }
-      const response = await fetch(viewUrl);
-      if (!response.ok) {
-        throw new Error('Khong the doc file Excel');
-      }
-      const buffer = await response.arrayBuffer();
-      const workbook = window.XLSX.read(buffer, { type: 'array' });
-      const sheetNames = workbook.SheetNames || [];
-      if (!sheetNames.length) {
-        throw new Error('File Excel khong co sheet');
-      }
-      const activeSheet = sheetNames[0];
-      setExcelViewer({
-        fileName,
-        workbook,
-        sheetNames,
-        activeSheet,
-        rows: getSheetRows(workbook, activeSheet),
-        loading: false,
-        error: null,
-      });
-    } catch (err: any) {
-      setExcelViewer((current) => current && {
-        ...current,
-        loading: false,
-        error: err?.message || 'Loi doc file Excel',
-      });
+    const url = new URL('/scanner/excel-preview', window.location.origin);
+    url.searchParams.set('url', viewUrl);
+    url.searchParams.set('name', fileName || 'Excel');
+    if (downloadUrl) {
+      url.searchParams.set('download', downloadUrl);
     }
-  };
-
-  const switchExcelSheet = (sheetName: string) => {
-    setExcelViewer((current) => {
-      if (!current?.workbook) return current;
-      return {
-        ...current,
-        activeSheet: sheetName,
-        rows: getSheetRows(current.workbook, sheetName),
-      };
-    });
+    window.open(url.toString(), '_blank', 'noopener,noreferrer');
   };
 
   const openMaterialFolder = async (listUrl: string) => {
@@ -718,7 +1019,7 @@ const FolderTable: React.FC<FolderTableProps> = ({
       const res = await fetchMaterialFolder(listUrl);
       setMaterialFolder(res.data);
     } catch (err: any) {
-      setMaterialError(getApiErrorMessage(err, 'Khong the mo thu muc SMB'));
+      setMaterialError(getApiErrorMessage(err, labels.openSmbFolderError));
     } finally {
       setMaterialFolderLoading(false);
     }
@@ -739,7 +1040,7 @@ const FolderTable: React.FC<FolderTableProps> = ({
       const res = await fetchPlanFolderDocuments(folder.id);
       setMaterialDocs(res.data);
     } catch (err: any) {
-      setMaterialError(getApiErrorMessage(err, 'Khong tim thay tai lieu SMB'));
+      setMaterialError(getApiErrorMessage(err, labels.documentsNotFoundError));
     } finally {
       setMaterialLoading(false);
     }
@@ -752,47 +1053,219 @@ const FolderTable: React.FC<FolderTableProps> = ({
     setMaterialError(null);
     setMaterialLoading(false);
     setMaterialFolderLoading(false);
-    setExcelViewer(null);
   };
+
+  const visibleRowData = useMemo(() => {
+    const query = normalizeForMatch(smartSearch.trim());
+    const terms = query.split(/\s+/).filter(Boolean);
+    return rowData.filter((folder) => {
+      if (statusFilter && folder.status !== statusFilter) return false;
+      if (!terms.length) return true;
+
+      const source = normalizeForMatch(getFolderSearchText(folder));
+      return terms.every((term) => source.includes(term));
+    });
+  }, [getFolderSearchText, rowData, smartSearch, statusFilter]);
+
+  const columnPanelItems = useMemo(() => {
+    const state = getSmartTableColumnState(gridApi) as Array<{ colId?: string; hide?: boolean }>;
+    const hiddenById = new Map(state.map((item) => [String(item.colId || ''), !!item.hide]));
+    return columnDefs
+      .map((column) => {
+        const field = String(column.field || '');
+        return {
+          field,
+          label: String(column.headerName || field),
+          visible: gridApi ? !hiddenById.get(field) : column.hide !== true,
+        };
+      })
+      .filter((item) => item.field);
+  }, [columnDefs, columnUiVersion, gridApi]);
+
+  const activeQuickFilterCount = [smartSearch, statusFilter].filter(Boolean).length;
 
   return (
     <div className="folder-table-container">
-      <div className="toolbar scanner-root-toolbar">
-        <label className="scanner-root-label" htmlFor="scanner-smb-root">SMB link</label>
-        <input
-          id="scanner-smb-root"
-          className="scanner-root-input"
-          value={smbDraft}
-          onChange={(event) => handleSmbDraftChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              handleScanSmbRoot();
-            }
-          }}
-          placeholder="\\\\server\\share\\du-an-ca-nhan"
-          disabled={smbBusy}
-        />
-        <button type="button" onClick={handleSaveSmbRoot} disabled={smbBusy}>
-          Luu
-        </button>
-        <button type="button" onClick={handleScanSmbRoot} disabled={smbBusy}>
-          Quet
-        </button>
-        {smbMessage && <span className="scanner-root-message">{smbMessage}</span>}
-        {error && <span className="error-banner">{error}</span>}
+      <div className="scanner-control-panel">
+        <div className="scanner-tool-row">
+          <div className="scanner-search-group">
+            <span className="scanner-search-icon" aria-hidden="true" />
+            <input
+              className="scanner-search-input"
+              value={smartSearch}
+              onChange={(event) => setSmartSearch(event.target.value)}
+              placeholder={labels.searchPlaceholder}
+            />
+            {smartSearch && (
+              <button
+                type="button"
+                className="scanner-search-clear"
+                onClick={() => setSmartSearch('')}
+                aria-label={labels.clearSearch}
+              >
+                x
+              </button>
+            )}
+          </div>
+          <div className="scanner-filter-group">
+            <select
+              className="scanner-filter-select"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
+              <option value="">{labels.allStatus}</option>
+              {statusOptions.map((status) => (
+                <option key={status.value} value={status.value}>
+                  {status.value === 'active'
+                    ? labels.statusActive
+                    : status.value === 'deleted'
+                      ? labels.statusDeleted
+                      : status.value === 'pending'
+                        ? labels.statusPending
+                        : status.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="scanner-view-actions">
+            <button
+              type="button"
+              className={columnPanelOpen ? 'is-active' : ''}
+              onClick={() => setColumnPanelOpen((open) => !open)}
+            >
+              {labels.columns}
+            </button>
+            <button
+              type="button"
+              className={density === 'compact' ? 'is-active' : ''}
+              onClick={() => handleDensityChange(density === 'compact' ? 'comfortable' : 'compact')}
+            >
+              {density === 'compact' ? labels.compact : labels.comfortable}
+            </button>
+            <button type="button" onClick={handleResetSmartTableLayout}>
+              {labels.resetLayout}
+            </button>
+          </div>
+          <div className="scanner-table-summary">
+            <span>{labels.rowsShown(visibleRowData.length, rowData.length)}</span>
+            {activeQuickFilterCount > 0 && <span>{labels.quickFilters(activeQuickFilterCount)}</span>}
+          </div>
+        </div>
+        {(smbMessage || error) && (
+          <div className="scanner-feedback-row">
+            {smbMessage && <span className="scanner-root-message">{smbMessage}</span>}
+            {error && <span className="error-banner">{error}</span>}
+          </div>
+        )}
       </div>
+      {settingsPanelOpen && (
+        <div className="scanner-settings-backdrop" onClick={() => setSettingsPanelOpen(false)}>
+          <section
+            className="scanner-settings-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="scanner-settings-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="scanner-settings-header">
+              <div className="scanner-settings-title" id="scanner-settings-title">
+                <span className="scanner-settings-title-icon" aria-hidden="true" />
+                <strong>{labels.scanSettings}</strong>
+              </div>
+              <button
+                type="button"
+                className="scanner-settings-close"
+                onClick={() => setSettingsPanelOpen(false)}
+                aria-label={labels.closeSettings}
+              >
+                x
+              </button>
+            </div>
+            <div className="scanner-settings-body">
+              <div className="scanner-root-group">
+                <label className="scanner-root-label" htmlFor="scanner-smb-root">SMB</label>
+                <input
+                  id="scanner-smb-root"
+                  className="scanner-root-input"
+                  value={smbDraft}
+                  onChange={(event) => handleSmbDraftChange(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      handleScanSmbRoot();
+                    }
+                  }}
+                  placeholder={labels.smbPlaceholder}
+                  disabled={smbBusy}
+                  autoFocus
+                />
+              </div>
+              <div className="scanner-primary-actions">
+                <button type="button" className="scanner-action-button" onClick={handleSaveSmbRoot} disabled={smbBusy}>
+                  <span className="scanner-action-icon scanner-action-icon-save" aria-hidden="true" />
+                  {labels.save}
+                </button>
+                <button type="button" className="scanner-action-button scanner-action-button-primary" onClick={handleScanSmbRoot} disabled={smbBusy}>
+                  <span className="scanner-action-icon scanner-action-icon-scan" aria-hidden="true" />
+                  {labels.scan}
+                </button>
+              </div>
+            </div>
+            {(smbMessage || error) && (
+              <div className="scanner-settings-feedback">
+                {smbMessage && <span className="scanner-root-message">{smbMessage}</span>}
+                {error && <span className="error-banner">{error}</span>}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+      {columnPanelOpen && (
+        <div className="scanner-column-panel">
+          <div className="scanner-column-panel-header">
+            <strong>{labels.visibleColumns}</strong>
+            <span>{columnPanelItems.filter((item) => item.visible).length}/{columnPanelItems.length}</span>
+          </div>
+          <div className="scanner-column-list">
+            {columnPanelItems.map((column) => (
+              <label className="scanner-column-item" key={column.field}>
+                <input
+                  type="checkbox"
+                  checked={column.visible}
+                  onChange={(event) => {
+                    setSmartTableColumnVisible(gridApi, column.field, event.target.checked);
+                    persistSmartTableLayout();
+                  }}
+                />
+                <span>{column.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="ag-theme-quartz folder-grid">
          <AgGridReact
-           rowData={rowData}
+           rowData={visibleRowData}
            columnDefs={columnDefs}
            onGridReady={onGridReady}
+           onColumnMoved={() => persistSmartTableLayout()}
+           onColumnResized={(event) => {
+             if ((event as any).finished) persistSmartTableLayout();
+           }}
+           onColumnVisible={() => persistSmartTableLayout()}
+           onFilterChanged={() => persistSmartTableLayout()}
+           onSortChanged={() => persistSmartTableLayout()}
           onCellValueChanged={onCellValueChanged}
            onRowClicked={handleRowClick}
            onRowDoubleClicked={handleRowDoubleClick}
            getRowId={(params) => String(params.data.id)}
            rowSelection="single"
            domLayout="normal"
+           rowHeight={rowHeight}
+           headerHeight={headerHeight}
            defaultColDef={{
+             sortable: true,
+             resizable: true,
+             filter: true,
              cellClass: 'col-with-border',
              headerClass: 'col-with-border',
            }}
@@ -802,7 +1275,7 @@ const FolderTable: React.FC<FolderTableProps> = ({
       {editingFolder && (
         <div className="editor-overlay">
           <div className="editor-popup">
-            <h3>Edit: {editingFolder.name}</h3>
+            <h3>{labels.editTitle}: {editingFolder.name}</h3>
             <FolderEditor
               folder={editingFolder}
               defaultMode={editingMode}
@@ -817,13 +1290,16 @@ const FolderTable: React.FC<FolderTableProps> = ({
         <div className="material-modal-overlay" onMouseDown={closeMaterialModal}>
           <div className="material-modal" onMouseDown={(event) => event.stopPropagation()}>
             <div className="material-modal-header">
-              <h3>Tai lieu ma phuong an: {materialCode}</h3>
-              <button type="button" className="material-close-btn" onClick={closeMaterialModal}>
+              <h3>
+                <span>{labels.materialTitle}</span>
+                <b>{materialCode}</b>
+              </h3>
+              <button type="button" className="material-close-btn" onClick={closeMaterialModal} aria-label={labels.close}>
                 x
               </button>
             </div>
             <div className="material-modal-body">
-              {materialLoading && <div className="material-muted">Dang tai tai lieu...</div>}
+              {materialLoading && <div className="material-muted">{labels.loadingDocuments}</div>}
 
               {materialError && (
                 <div className="material-alert">
@@ -834,9 +1310,9 @@ const FolderTable: React.FC<FolderTableProps> = ({
               {materialDocs && !materialLoading && (
                 <>
                   <div className="material-summary">
-                    <span>{materialDocs.message || `Tim thay ${materialDocs.documents.length} tai lieu`}</span>
+                    <span>{labels.materialSummary(materialDocs.documents.length, materialDocs.folders?.length || 0)}</span>
                     {materialDocs.resolved_code && materialDocs.resolved_code !== materialDocs.code && (
-                      <span>Ma me: {materialDocs.resolved_code}</span>
+                      <span>{labels.parentCode}: {materialDocs.resolved_code}</span>
                     )}
                   </div>
 
@@ -861,7 +1337,10 @@ const FolderTable: React.FC<FolderTableProps> = ({
 
                   {materialDocs.folders?.length ? (
                     <section className="material-section">
-                      <div className="material-section-title">Thu muc SMB</div>
+                      <div className="material-section-title">
+                        <span>{labels.smbFolders}</span>
+                        <small>{materialDocs.folders.length}</small>
+                      </div>
                       <div className="material-folder-buttons">
                         {materialDocs.folders.map((folder) => (
                           <button
@@ -871,20 +1350,21 @@ const FolderTable: React.FC<FolderTableProps> = ({
                             disabled={!folder.exists}
                             onClick={() => openMaterialFolder(folder.list_url)}
                           >
-                            <span>{folder.name || 'Thu muc'}</span>
-                            <small>{Number(folder.file_count || 0)} file</small>
+                            <span>{folder.name || labels.folderFallback}</span>
+                            <small>{labels.fileCount(Number(folder.file_count || 0))}</small>
                           </button>
                         ))}
                       </div>
                     </section>
                   ) : null}
 
-                  {materialFolderLoading && <div className="material-muted">Dang mo thu muc...</div>}
+                  {materialFolderLoading && <div className="material-muted">{labels.openingFolder}</div>}
 
                   {materialFolder && (
                     <section className="material-section">
                       <div className="material-section-title">
-                        {materialFolder.folder_name || 'Thu muc'}
+                        <span>{materialFolder.folder_name || labels.folderFallback}</span>
+                        <small>{materialFolder.entries?.length || 0}</small>
                       </div>
                       <div className="material-doc-list">
                         {(materialFolder.entries || []).map((entry) => (
@@ -901,19 +1381,19 @@ const FolderTable: React.FC<FolderTableProps> = ({
                             <div className="material-actions">
                               {entry.is_dir ? (
                                 <button type="button" onClick={() => openMaterialFolder(entry.list_url || '')}>
-                                  Mo
+                                  {labels.open}
                                 </button>
                               ) : entry.type === 'bom' ? (
-                                <button type="button" onClick={() => openExcelViewer(entry.name, entry.view_url || '')}>
-                                  Mo
+                                <button type="button" onClick={() => openExcelPreviewTab(entry.name, entry.view_url || '', entry.download_url || '')}>
+                                  {labels.open}
                                 </button>
                               ) : (
                                 <a href={entry.view_url || '#'} target="_blank" rel="noopener noreferrer">
-                                  Mo
+                                  {labels.open}
                                 </a>
                               )}
                               {!entry.is_dir && (
-                                <a href={entry.download_url || '#'}>Tai</a>
+                                <a href={entry.download_url || '#'}>{labels.download}</a>
                               )}
                             </div>
                           </div>
@@ -922,59 +1402,12 @@ const FolderTable: React.FC<FolderTableProps> = ({
                     </section>
                   )}
 
-                  {excelViewer && (
-                    <section className="material-section excel-viewer-section">
-                      <div className="excel-viewer-header">
-                        <div className="material-section-title">{excelViewer.fileName || 'Excel Viewer'}</div>
-                        <button type="button" className="excel-viewer-close" onClick={() => setExcelViewer(null)}>
-                          x
-                        </button>
-                      </div>
-                      {excelViewer.loading && <div className="material-muted">Dang tai file Excel...</div>}
-                      {excelViewer.error && <div className="material-alert">{excelViewer.error}</div>}
-                      {!excelViewer.loading && !excelViewer.error && (
-                        <>
-                          {excelViewer.sheetNames.length > 1 && (
-                            <div className="excel-sheet-tabs">
-                              {excelViewer.sheetNames.map((sheetName) => (
-                                <button
-                                  type="button"
-                                  key={sheetName}
-                                  className={sheetName === excelViewer.activeSheet ? 'active' : ''}
-                                  onClick={() => switchExcelSheet(sheetName)}
-                                >
-                                  {sheetName}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                          <div className="excel-table-wrap">
-                            <table className="excel-table">
-                              <tbody>
-                                {excelViewer.rows.length ? (
-                                  excelViewer.rows.map((row, rowIndex) => (
-                                    <tr key={`${excelViewer.activeSheet}-${rowIndex}`}>
-                                      {row.map((cell, cellIndex) => (
-                                        <td key={`${rowIndex}-${cellIndex}`}>{cell}</td>
-                                      ))}
-                                    </tr>
-                                  ))
-                                ) : (
-                                  <tr>
-                                    <td>Sheet trong</td>
-                                  </tr>
-                                )}
-                              </tbody>
-                            </table>
-                          </div>
-                        </>
-                      )}
-                    </section>
-                  )}
-
                   {(materialDocs.documents || []).length ? (
                     <section className="material-section">
-                      <div className="material-section-title">File</div>
+                      <div className="material-section-title">
+                        <span>{labels.fileSection}</span>
+                        <small>{materialDocs.documents.length}</small>
+                      </div>
                       <div className="material-doc-list">
                         {(materialDocs.documents || []).map((doc) => (
                           <div className={`material-doc-row${doc.exists ? '' : ' is-missing'}`} key={`${doc.name}-${doc.view_url}`}>
@@ -984,7 +1417,9 @@ const FolderTable: React.FC<FolderTableProps> = ({
                               <span>
                                 {getMaterialTypeLabel(doc.type)}
                                 {doc.folder_name ? ` - ${doc.folder_name}` : ''}
-                                {doc.exists ? '' : ' - server khong truy cap duoc file'}
+                                {doc.size ? ` - ${formatFileSize(doc.size)}` : ''}
+                                {doc.modified_at ? ` - ${formatDateTime(doc.modified_at)}` : ''}
+                                {doc.exists ? '' : ` - ${labels.missingFileNote}`}
                               </span>
                             </div>
                             <div className="material-actions">
@@ -993,9 +1428,9 @@ const FolderTable: React.FC<FolderTableProps> = ({
                                   type="button"
                                   className={doc.exists ? '' : 'disabled'}
                                   disabled={!doc.exists}
-                                  onClick={() => openExcelViewer(doc.name, doc.view_url || '')}
+                                  onClick={() => openExcelPreviewTab(doc.name, doc.view_url || '', doc.download_url || '')}
                                 >
-                                  Mo
+                                  {labels.open}
                                 </button>
                               ) : (
                                 <a
@@ -1004,11 +1439,11 @@ const FolderTable: React.FC<FolderTableProps> = ({
                                   target="_blank"
                                   rel="noopener noreferrer"
                                 >
-                                  Mo
+                                  {labels.open}
                                 </a>
                               )}
                               <a className={doc.exists ? '' : 'disabled'} href={doc.download_url || '#'}>
-                                Tai
+                                {labels.download}
                               </a>
                             </div>
                           </div>
@@ -1017,7 +1452,7 @@ const FolderTable: React.FC<FolderTableProps> = ({
                     </section>
                   ) : (
                     <div className="material-alert">
-                      {materialDocs.message || 'Khong tim thay tai lieu'}
+                      {materialDocs.message || labels.noDocuments}
                     </div>
                   )}
                 </>
