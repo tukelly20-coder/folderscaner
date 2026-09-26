@@ -142,6 +142,7 @@ export interface MaterialDocumentFolder {
   exists: boolean;
   file_count: number;
   list_url: string;
+  open_url?: string;
 }
 
 export interface MaterialDocumentItem {
@@ -151,6 +152,7 @@ export interface MaterialDocumentItem {
   exists: boolean;
   view_url: string;
   download_url: string;
+  open_url?: string;
   size?: number;
   modified_at?: string;
 }
@@ -167,6 +169,7 @@ export interface MaterialFolderResponse {
   entries: MaterialFolderEntry[];
   total?: number;
   truncated?: boolean;
+  open_url?: string;
 }
 
 export interface MaterialDocumentsResponse {
@@ -176,6 +179,8 @@ export interface MaterialDocumentsResponse {
   message?: string;
   documents: MaterialDocumentItem[];
   folders: MaterialDocumentFolder[];
+  open_url?: string;
+  smb_path?: string;
   erp_info?: MaterialErpInfo;
 }
 
@@ -197,6 +202,13 @@ export const fetchPlanFolderDocuments = (folderId: number) =>
 
 export const fetchMaterialFolder = (listUrl: string) =>
   axios.get<MaterialFolderResponse>(listUrl, { timeout: 30000 });
+
+export const openMaterialFolderInExplorer = (openUrl: string) =>
+  axios.post<{ success: boolean; folder_name: string; path: string }>(
+    openUrl,
+    null,
+    { timeout: 15000 },
+  );
 
 export const triggerScan = (root?: string, forceDocuments = true, userKey?: string) =>
   api.post<{ success: boolean; results: any }>('/scanner/scan', null, {

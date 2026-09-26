@@ -65,15 +65,17 @@ PRODUCT_KEYWORDS = {
     "ZZC": ("ZZC", "周转车"),
     "GZT": ("GZT", "工作台"),
     "WCP": ("WCP", "无尘棚"),
-    "LSX": ("LSX", "流水线", "皮带线", "输送线", "PVC皮带线"),
+    "LSX": ("LSX", "流水线", "回流线", "皮带线", "输送线", "PVC皮带线"),
     "ZWJ": ("ZWJ", "转弯机", "顶升移栽", "移栽机"),
-    "GZL": ("GZL", "改造"),
+    "GZL": ("GZL", "改造", "技改"),
     "BSX": ("BSX", "倍速线"),
     "WLL": ("WLL", "围栏", "护栏"),
     "GTX": ("GTX", "滚筒线"),
     "ZHT": ("ZHT", "展会图", "平面"),
     "LHX": ("LHX", "老化线"),
 }
+
+UNKNOWN_PRODUCT_NOTICE_STATUS = "Cần phân loại sản phẩm - Không đoán được từ quy cách/thư mục"
 
 
 def _main_db_path() -> Path:
@@ -361,6 +363,7 @@ def sync_folder_to_main_project(folder: Folder) -> dict[str, Any]:
     plan_code = parts["plan_code"]
     spec = _extract_spec(folder.name, parts["plan_code"])
     drawing_code = _primary_drawing_code(folder)
+    detected_product_type = _detect_product_type(folder, spec)
     payload = {
         "Created_Date": parts["year_month"],
         "khach_hang": _clean(folder.customer_name),
@@ -368,8 +371,14 @@ def sync_folder_to_main_project(folder: Folder) -> dict[str, Any]:
         "quy_cach": spec,
         "ma_ban_ve": plan_code,
         "ma_ban_ve_ky_thuat": drawing_code,
-        "loai_san_pham": _detect_product_type(folder, spec),
+        "loai_san_pham": detected_product_type,
     }
+    if not detected_product_type:
+        payload.update({
+            "is_pending": "yes",
+            "urgency_level": "normal",
+            "tinh_trang_hoan_thanh": UNKNOWN_PRODUCT_NOTICE_STATUS,
+        })
     payload = {key: value for key, value in payload.items() if _clean(value)}
     if not payload:
         return {"success": False, "reason": "no_source_data"}
@@ -413,6 +422,27 @@ def sync_folder_to_main_project(folder: Folder) -> dict[str, Any]:
             for key, value in payload.items()
             if key in columns and _clean(current.get(key)) != _clean(value)
         }
+        current_product_type = _clean(current.get("loai_san_pham"))
+        current_completion = _clean(current.get("tinh_trang_hoan_thanh"))
+        if not detected_product_type and not current_product_type:
+            if "is_pending" in columns and _clean(current.get("is_pending")).lower() != "yes":
+                updates["is_pending"] = "yes"
+            if "urgency_level" in columns and not _clean(current.get("urgency_level")):
+                updates["urgency_level"] = "normal"
+            if (
+                "tinh_trang_hoan_thanh" in columns
+                and current_completion != UNKNOWN_PRODUCT_NOTICE_STATUS
+            ):
+                updates["tinh_trang_hoan_thanh"] = UNKNOWN_PRODUCT_NOTICE_STATUS
+        elif detected_product_type and current_completion == UNKNOWN_PRODUCT_NOTICE_STATUS:
+            if "tinh_trang_hoan_thanh" in columns:
+                updates["tinh_trang_hoan_thanh"] = ""
+            if (
+                "is_pending" in columns
+                and _clean(current.get("is_pending")).lower() == "yes"
+                and not _clean(current.get("accepted_by"))
+            ):
+                updates["is_pending"] = "no"
         folder_category = _category_from_folder_text(folder.name, spec)
         current_drawing_category = _category_from_code(current.get("ma_ban_ve_ky_thuat"))
         if (

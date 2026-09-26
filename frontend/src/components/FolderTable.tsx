@@ -11,6 +11,7 @@ import {
   fetchMaterialFolder,
   fetchPlanFolderDocuments,
   fetchFolders,
+  openMaterialFolderInExplorer,
   fetchUserSmbRoot,
   saveUserSmbRoot,
   triggerScan,
@@ -93,6 +94,8 @@ const scannerTranslations = {
     folderFallback: 'Thư mục',
     fileCount: (count: number) => `${count} file`,
     openingFolder: 'Đang mở thư mục...',
+    openingExplorer: 'Đang mở Explorer...',
+    openExplorer: 'Explorer',
     open: 'Mở',
     close: 'Đóng',
     download: 'Tải',
@@ -106,6 +109,7 @@ const scannerTranslations = {
     excelNoSheetError: 'File Excel không có sheet',
     excelError: 'Lỗi đọc file Excel',
     openSmbFolderError: 'Không thể mở thư mục SMB',
+    openExplorerError: 'Không thể mở thư mục trong Explorer',
     documentsNotFoundError: 'Không tìm thấy tài liệu SMB',
     missingFileNote: 'server không truy cập được file',
     noDocuments: 'Không tìm thấy tài liệu',
@@ -164,6 +168,8 @@ const scannerTranslations = {
     folderFallback: '文件夹',
     fileCount: (count: number) => `${count} 个文件`,
     openingFolder: '正在打开文件夹...',
+    openingExplorer: '正在打开资源管理器...',
+    openExplorer: '资源管理器',
     open: '打开',
     close: '关闭',
     download: '下载',
@@ -177,6 +183,7 @@ const scannerTranslations = {
     excelNoSheetError: 'Excel文件没有工作表',
     excelError: '读取Excel出错',
     openSmbFolderError: '无法打开SMB文件夹',
+    openExplorerError: '无法在资源管理器中打开文件夹',
     documentsNotFoundError: '未找到SMB资料',
     missingFileNote: '服务器无法访问此文件',
     noDocuments: '未找到资料',
@@ -308,9 +315,11 @@ const FolderTable: React.FC<FolderTableProps> = ({
     Number(initialTableLayout.headerHeight) || SMART_TABLE_DEFAULT_HEADER_HEIGHT,
   );
   const [materialCode, setMaterialCode] = useState('');
+  const [materialFolderId, setMaterialFolderId] = useState<number | null>(null);
   const [materialDocs, setMaterialDocs] = useState<MaterialDocumentsResponse | null>(null);
   const [materialFolder, setMaterialFolder] = useState<MaterialFolderResponse | null>(null);
   const [materialFolderLoading, setMaterialFolderLoading] = useState(false);
+  const [materialExplorerLoading, setMaterialExplorerLoading] = useState(false);
   const [materialLoading, setMaterialLoading] = useState(false);
   const [materialError, setMaterialError] = useState<string | null>(null);
   const rowDataRef = useRef<FolderRead[]>([]);
@@ -1025,12 +1034,32 @@ const FolderTable: React.FC<FolderTableProps> = ({
     }
   };
 
+  const getExplorerOpenUrl = (openUrl?: string, listUrl?: string): string => {
+    if (openUrl) return openUrl;
+    if (listUrl) return listUrl.replace(/\/folder(?=($|\?))/, '/open');
+    return materialFolderId ? `/scanner-api/documents/folders/${materialFolderId}/open` : '';
+  };
+
+  const openMaterialExplorer = async (openUrl?: string) => {
+    if (!openUrl) return;
+    setMaterialExplorerLoading(true);
+    setMaterialError(null);
+    try {
+      await openMaterialFolderInExplorer(openUrl);
+    } catch (err: any) {
+      setMaterialError(getApiErrorMessage(err, labels.openExplorerError));
+    } finally {
+      setMaterialExplorerLoading(false);
+    }
+  };
+
   const handleRowDoubleClick = async (params: any) => {
     const folder = params.data as FolderRead | undefined;
     if (!folder) return;
 
     const code = getPlanCode(folder).trim();
     setMaterialCode(code);
+    setMaterialFolderId(folder.id);
     setMaterialDocs(null);
     setMaterialFolder(null);
     setMaterialError(null);
@@ -1048,11 +1077,13 @@ const FolderTable: React.FC<FolderTableProps> = ({
 
   const closeMaterialModal = () => {
     setMaterialCode('');
+    setMaterialFolderId(null);
     setMaterialDocs(null);
     setMaterialFolder(null);
     setMaterialError(null);
     setMaterialLoading(false);
     setMaterialFolderLoading(false);
+    setMaterialExplorerLoading(false);
   };
 
   const visibleRowData = useMemo(() => {
@@ -1314,7 +1345,18 @@ const FolderTable: React.FC<FolderTableProps> = ({
                     {materialDocs.resolved_code && materialDocs.resolved_code !== materialDocs.code && (
                       <span>{labels.parentCode}: {materialDocs.resolved_code}</span>
                     )}
+                    {getExplorerOpenUrl(materialDocs.open_url) && (
+                      <button
+                        type="button"
+                        className="material-summary-action"
+                        disabled={materialExplorerLoading}
+                        onClick={() => openMaterialExplorer(getExplorerOpenUrl(materialDocs.open_url))}
+                      >
+                        {labels.openExplorer}
+                      </button>
+                    )}
                   </div>
+                  {materialExplorerLoading && <div className="material-muted">{labels.openingExplorer}</div>}
 
                   {materialDocs.erp_info?.rows?.length ? (
                     <section className="material-section">
@@ -1343,16 +1385,30 @@ const FolderTable: React.FC<FolderTableProps> = ({
                       </div>
                       <div className="material-folder-buttons">
                         {materialDocs.folders.map((folder) => (
-                          <button
-                            type="button"
+                          <div
                             key={folder.list_url || folder.name}
-                            className="material-folder-btn"
-                            disabled={!folder.exists}
-                            onClick={() => openMaterialFolder(folder.list_url)}
+                            className={`material-folder-card${folder.exists ? '' : ' is-disabled'}`}
                           >
-                            <span>{folder.name || labels.folderFallback}</span>
-                            <small>{labels.fileCount(Number(folder.file_count || 0))}</small>
-                          </button>
+                            <button
+                              type="button"
+                              className="material-folder-btn"
+                              disabled={!folder.exists}
+                              onClick={() => openMaterialFolder(folder.list_url)}
+                            >
+                              <span>{folder.name || labels.folderFallback}</span>
+                              <small>{labels.fileCount(Number(folder.file_count || 0))}</small>
+                            </button>
+                            {getExplorerOpenUrl(folder.open_url, folder.list_url) && (
+                              <button
+                                type="button"
+                                className="material-folder-explorer-btn"
+                                disabled={!folder.exists || materialExplorerLoading}
+                                onClick={() => openMaterialExplorer(getExplorerOpenUrl(folder.open_url, folder.list_url))}
+                              >
+                                {labels.openExplorer}
+                              </button>
+                            )}
+                          </div>
                         ))}
                       </div>
                     </section>
@@ -1380,9 +1436,16 @@ const FolderTable: React.FC<FolderTableProps> = ({
                             </div>
                             <div className="material-actions">
                               {entry.is_dir ? (
-                                <button type="button" onClick={() => openMaterialFolder(entry.list_url || '')}>
-                                  {labels.open}
-                                </button>
+                                <>
+                                  <button type="button" onClick={() => openMaterialFolder(entry.list_url || '')}>
+                                    {labels.open}
+                                  </button>
+                                  {getExplorerOpenUrl(entry.open_url, entry.list_url) && (
+                                    <button type="button" onClick={() => openMaterialExplorer(getExplorerOpenUrl(entry.open_url, entry.list_url))}>
+                                      {labels.openExplorer}
+                                    </button>
+                                  )}
+                                </>
                               ) : entry.type === 'bom' ? (
                                 <button type="button" onClick={() => openExcelPreviewTab(entry.name, entry.view_url || '', entry.download_url || '')}>
                                   {labels.open}
